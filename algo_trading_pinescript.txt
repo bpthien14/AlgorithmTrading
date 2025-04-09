@@ -1,0 +1,2358 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © thienbui0143
+
+
+//@version=6
+strategy("Tổng - dời SL 05R - Đã Visual",default_qty_type = strategy.cash, initial_capital = 10000000, overlay=true, max_lines_count = 500, max_bars_back = 500, max_boxes_count = 500, max_labels_count = 500)
+
+var bool make_color_giam = false
+// Khởi tạo mảng để lưu trữ giá đóng cửa của nến m1
+var float m15_open = 0
+var float m15_close = 0
+var float m15_low = 0
+var float m15_high = 0
+
+var m15_opens = array.new_float()
+var m15_closes = array.new_float()
+var m15_lows = array.new_float()
+var m15_highs = array.new_float()
+
+
+// Timeframe functionality
+// Timeframe for security functions
+TF(TF_Period, TF_Multip) =>
+    switch TF_Period
+        "Minute" => str.tostring(TF_Multip)
+        "Hour"   => str.tostring(TF_Multip*60)
+        "Day"    => str.tostring(TF_Multip) + "D"
+        "Week"   => str.tostring(TF_Multip) + "W"
+        "Month"  => str.tostring(TF_Multip) + "M"
+        => timeframe.period
+
+
+// Hàm lấy các thông số OHLC của các nến M1 khi nến M15 đóng
+get_m15_candles() =>
+    // Sử dụng request.security_lower_tf() để lấy dữ liệu từ khung thời gian thấp hơn (M1)
+    m15_close_func = request.security(syminfo.tickerid, "15", close)
+    m15_open_func = request.security(syminfo.tickerid, "15", open)
+    m15_high_func = request.security(syminfo.tickerid, "15", high)
+    m15_low_func = request.security(syminfo.tickerid, "15", low)
+    // Trả về các mảng chứa thông tin
+    [m15_open_func, m15_close_func, m15_high_func, m15_low_func]
+
+is_new_m15_candle_close = minute % 15 == 14
+
+// Gọi hàm và lấy thông tin các nến M1
+if is_new_m15_candle_close
+    [m15_open_get, m15_close_get, m15_high_get, m15_low_get] = get_m15_candles()
+    m15_close := m15_close_get
+    m15_high := m15_high_get
+    m15_low := m15_low_get
+    m15_open := m15_open_get
+
+if m15_close > 0 and is_new_m15_candle_close
+    array.push(m15_opens, m15_open )
+    array.push(m15_closes, m15_close)
+    array.push(m15_highs, m15_high )
+    array.push(m15_lows, m15_low )
+
+if array.size(m15_closes) > 7
+    for i = 0 to 2 by 1
+        array.shift(m15_opens)
+        array.shift(m15_closes)
+        array.shift(m15_highs)
+        array.shift(m15_lows)
+
+// Constants
+Transparent_Color = color.new(color.white, 100)
+
+
+// Groups
+General_Settings_group = "-------General Settings-------"
+Timeframe_1_Group  = "-------Timeframe 1 Settings--------"
+Timeframe_2_Group  = "-------Timeframe 2 Settings--------"
+Timeframe_3_Group  = "-------Timeframe 3 Settings--------"
+
+
+// Tooltips
+Hide_MS_Tooltip = "If true will hide all MS plots such as \"HH 2H\" or \"HH 15min\""
+Hide_Breaks_Tooltip = "If true will hide all MS breaks such as \"BOS 1H\" or \"MSS 15min\""
+Timeframe_Tooltip = "If set to chart is true no need to alter these two inputs."
+Set_To_Chart_Tooltip = "If set to chart is set to true, there is no need to alter the Timeframe inputs, it will automatically configure itself to the charts timeframe."
+Lower_Timeframe_Tooltip = "If set to true and chart timeframe is higher than the choosen timeframe, structure will not display. Note plotting ltf structure on a htf will provide inaccurate plots."
+Use_High_Low_Tooltip = "If set to true high and low values will be used to confirm market structure else if set to false close will be used."
+Display_TF_Pivots = "If true the script will display the timeframe declared in the TF inputs"
+Display_TF_MS = "If true the script will display the timeframe's market structure declared in the TF inputs if Hide all Market Structure is false in general settings."
+BOS_Alert_Tooltip = "Set to true to activate BOS alerts then proceed to set the any alert function specifically on this script."
+MSS_Alert_Tooltip = "Set to true to activate MSS alerts then proceed to set the any alert function specifically on this script."
+BOS_Plot_Tooltip = "If set to true the TF BOS plots will be plotted else if false they will be hidden."
+MSS_Plot_Tooltip = "If set to true the TF MSS plots will be plotted else if false they will be hidden."
+
+
+
+// General Settings
+Hide_All_MS = input.bool(defval = true, title = "Hide all Market Structure", group = General_Settings_group, tooltip = Hide_MS_Tooltip)
+Hide_All_Breaks = input.bool(defval = false, title = "Hide all Structure Breaks", group = General_Settings_group, tooltip = Hide_Breaks_Tooltip)
+Show_Only_On_Lower_Timeframes = input.bool(defval = false, title = "Show Structure only on a lower Timeframe", group = General_Settings_group, tooltip = Lower_Timeframe_Tooltip)
+
+
+// User Inputs
+// Timeframe 1 Settings
+TF_1_Multip = input.int(defval=5, minval=1, maxval=1440, title="Timeframe 1", group=Timeframe_1_Group, inline="T1")
+TF_1_Period = input.string(defval="Minute", title="", options=["Minute", "Hour", "Day", "Week", "Month"], group=Timeframe_1_Group, inline="T1")
+TF_1_Swing_Length = input.int(defval = 7, title = "Swing Length", minval = 1, group = Timeframe_1_Group)
+
+
+TF_2_Multip = input.int(defval=15, minval=1, maxval=1440, title="Timeframe 2", group=Timeframe_2_Group, inline="T2")
+TF_2_Period = input.string(defval="Minute", title="", options=["Minute", "Hour", "Day", "Week", "Month"], group=Timeframe_2_Group, inline="T2")
+TF_2_Swing_Length = input.int(defval = 7, title = "Swing Length", minval = 1, group = Timeframe_2_Group)
+
+TF_3_Multip = input.int(defval=1, minval=1, maxval=1440, title="Timeframe 3", group=Timeframe_3_Group, inline="T3")
+TF_3_Period = input.string(defval="Minute", title="", options=["Minute", "Hour", "Day", "Week", "Month"], group=Timeframe_3_Group, inline="T2")
+TF_3_Swing_Length = input.int(defval = 7, title = "Swing Length", minval = 1, group = Timeframe_3_Group)
+
+
+
+// Calculating the Mtf BOS and MSS
+// Getting the high and low values
+[TF_1_SH, TF_1_SL] = request.security(symbol = syminfo.tickerid, timeframe = ( TF(TF_1_Period, TF_1_Multip)), expression = [ta.pivothigh(high, TF_1_Swing_Length, TF_1_Swing_Length), ta.pivotlow(low, TF_1_Swing_Length, TF_1_Swing_Length)])
+[TF_2_SH, TF_2_SL] = request.security(symbol = syminfo.tickerid, timeframe = ( TF(TF_2_Period, TF_2_Multip)), expression = [ta.pivothigh(high, TF_2_Swing_Length, TF_2_Swing_Length), ta.pivotlow(low, TF_2_Swing_Length, TF_2_Swing_Length)])
+// [TF_3_SH, TF_3_SL] = request.security(symbol = syminfo.tickerid, timeframe = ( TF(TF_3_Period, TF_3_Multip)), expression = [ta.pivothigh(high, TF_3_Swing_Length, TF_3_Swing_Length), ta.pivotlow(low, TF_3_Swing_Length, TF_3_Swing_Length)])
+// ADX
+//ADX
+len = input(14)
+th = input(20)
+
+TrueRange = math.max(math.max(high-low, math.abs(high-nz(close[1]))), math.abs(low-nz(close[1])))
+DirectionalMovementPlus = high-nz(high[1]) > nz(low[1])-low ? math.max(high-nz(high[1]), 0): 0
+DirectionalMovementMinus = nz(low[1])-low > high-nz(high[1]) ? math.max(nz(low[1])-low, 0): 0
+
+float SmoothedTrueRange = 0
+SmoothedTrueRange := nz(SmoothedTrueRange[1]) - (nz(SmoothedTrueRange[1])/len) + TrueRange
+
+float SmoothedDirectionalMovementPlus = 0
+SmoothedDirectionalMovementPlus := nz(SmoothedDirectionalMovementPlus[1]) - (nz(SmoothedDirectionalMovementPlus[1])/len) + DirectionalMovementPlus
+
+float SmoothedDirectionalMovementMinus = 0
+SmoothedDirectionalMovementMinus := nz(SmoothedDirectionalMovementMinus[1]) - (nz(SmoothedDirectionalMovementMinus[1])/len) + DirectionalMovementMinus
+
+DIPlus = SmoothedDirectionalMovementPlus / SmoothedTrueRange * 100
+DIMinus = SmoothedDirectionalMovementMinus / SmoothedTrueRange * 100
+DX = math.abs(DIPlus-DIMinus) / (DIPlus+DIMinus)*100
+ADX = ta.sma(DX, len)
+
+// Lấy giờ và phút hiện tại
+current_hour = hour(time, "UTC+7")
+current_minute = minute(time)
+current_time_in_minutes = current_hour * 60 + current_minute
+
+// Định nghĩa các mốc thời gian (trong phút)
+time_0700 = 7 * 60
+time_0800 = 8 * 60
+time_0830 = 8 * 60 + 30          // 07:00 = 420 phút
+time_0930 = 9 * 60 + 30 // 09:00
+time_1230 = 12 * 60 + 30 // 12:30 = 750 phút
+time_1330 = 13 * 60 + 30  // 13:30 = 1110 phút
+time_1400 = 14 * 60 
+time_1430 = 14 * 60 + 30
+time_1700 = 17 * 60
+time_1800 = 18 * 60
+time_2000 = 20 * 60
+time_2030 = 20 * 60 + 30
+// Kiểm tra cả hai khoảng thời gian
+is_within_timerange = ((current_time_in_minutes >= time_0700 and current_time_in_minutes < time_0800) or (current_time_in_minutes >= time_0830 and current_time_in_minutes <= time_0930) or (current_time_in_minutes >= time_1230 and current_time_in_minutes < time_1330) or (current_time_in_minutes >= time_1400 and current_time_in_minutes < time_1430) or (current_time_in_minutes >= time_1700 and current_time_in_minutes < time_1800) or (current_time_in_minutes >= time_2000 and current_time_in_minutes < time_2030))
+
+// label.new( bar_index, low, str.tostring(is_within_timerange) )
+
+var box boxBull  = na
+
+var arrayBoxDem = array.new_box()
+
+var arrayBoxBuyBase = array.new_box()
+
+// Mang dem so lan cham thong bao
+
+var arrayBoxDem_cham = array.new_int(0)
+
+var arrayBoxDem_status_touched = array.new_int(0)
+
+// Dk tô màu cho cặp nến tăng
+var bool make_color_tang = false
+var bool make_color_cho_rieng_case_4_tang = false
+
+var arrayGiaNenTang = array.new_float(0)
+
+var arrayGiaTriCuaLineTang = array.new_line(0)
+
+diff = input.float(defval=0.5, minval=0.1, maxval=20, title="Chênh lệch giá cho Liquidity Price")
+
+var arrayBuyLiquidity = array.new<float>(0)
+
+var arrayLabelBuy = array.new_label(0)
+
+var arrayDemandLv1 = array.new_float(0)
+var arrayDemandLv2 = array.new_float(0)
+
+var bool demand_finding_buy_base = false
+var bool liquid_finding_buy_base = false
+
+var int hai_phut_hon_liquid = 0
+var bool keep_finding_liquid_buy = false
+
+var int hai_phut_hon_demand = 0
+var bool keep_finding_demand = false
+
+var mang_so_lan_cham_buy_base = array.new_int()
+
+var bool finding_entry_buy = false
+var int finding_entry_buy_time_out = 0
+var int finding_entry_buy_ten_minutes = 0
+
+var bool making_buy_base = false
+var int do_buy_base_2_lan = 0
+var int muoi_bay_phut_time_out = 0
+
+var float removePrice = 0
+var float removePriceDemand = 0
+var float removePriceForLine = 0
+var float removeCandle_OpenPrice = 0
+
+var int index_of_high_nearest = 1
+var float canhTrenLastBoxBull = 0
+var float canhDuoiLastBoxBull = 0
+
+
+
+
+var box boxBear  = na
+
+var arrayBoxSup = array.new_box()
+
+var arrayBoxSellBase = array.new_box()
+
+// Mang dem so lan cham thong bao
+
+var arrayBoxSup_cham = array.new_int(0) 
+
+var arrayBoxSup_status_touched = array.new_int(0)
+
+// Dk tô màu cho cặp nến tăng
+var bool make_color_cho_rieng_case_4_giam = false
+
+var arrayGiaNenGiam = array.new_float(0)
+
+var arrayGiaTriCuaLineGiam = array.new_line(0)
+
+
+var arraySellLiquidity = array.new<float>(0)
+
+var arrayLabelSell = array.new_label(0)
+
+var arraySupplyLv1 = array.new_float(0)
+var arraySupplyLv2 = array.new_float(0)
+
+var bool supply_finding_sell_base = false
+var bool liquid_finding_sell_base = false
+
+var int hai_phut_hon_liquid_sell = 0
+var bool keep_finding_liquid_sell = false
+
+var int hai_phut_hon_supply = 0
+var bool keep_finding_supply = false
+
+var mang_so_lan_cham_sell_base = array.new_int()
+
+var bool finding_entry_sell = false
+var int finding_entry_sell_time_out = 0
+var int finding_entry_sell_ten_minutes = 0
+
+var bool making_sell_base = false
+var int do_sell_base_2_lan = 0
+var int muoi_bay_phut_time_out_sell_zone = 0
+
+var float removePrice_sell_zone = 10000
+var float removePriceSupply = 100000
+var float removeCanhDuoiSupply = 100000
+var float removeCandle_OpenPrice_Sell = 100000
+
+
+
+var int index_of_low_nearest = 1
+var float canhDuoiLastBoxBear = 0
+var float canhTrenLastBoxBear = 0
+
+var line tp_line_buy = na
+var line sl_line_buy = na
+var line tp_line_sell = na
+var line sl_line_sell = na
+
+var label tp_text_buy = na
+var label sl_text_buy = na
+var label tp_text_sell = na
+var label sl_text_sell = na 
+var float entry_price = 0
+
+float sl_buy = ta.lowest(10)
+
+float sl_sell = ta.highest(10)
+
+var bool doi_entry_buy_khi_gia_dat_09_R = false
+var bool doi_entry_sell_khi_gia_dat_09_R = false
+
+var bool khong_can_kiem_entry = false
+var bool khong_can_kiem_entry_sell = false
+var bool doi_sl_05R = false
+var bool doi_sl_05R_sell = false
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+if array.size(m15_closes) > 2
+
+
+    index = array.size(m15_closes) - 1 
+    high_nen_first = array.get(m15_highs, index - 2)
+    high_nen_second = array.get(m15_highs, index - 1)
+    high_nen_third = array.get(m15_highs, index)
+
+    close_nen_first = array.get(m15_closes, index - 2)
+    close_nen_second = array.get(m15_closes, index - 1)
+    close_nen_third = array.get(m15_closes, index)
+
+    open_nen_first = array.get(m15_opens, index - 2)
+    open_nen_second = array.get(m15_opens, index - 1)
+    open_nen_third = array.get(m15_opens, index)
+
+    low_nen_first = array.get(m15_lows, index - 2)
+    low_nen_second = array.get(m15_lows, index - 1)
+    low_nen_third = array.get(m15_lows, index)
+
+    conditionBuyLiquidity = (low_nen_second < low_nen_first) and (low_nen_second < low_nen_third) and (close_nen_third > open_nen_first - diff) and is_new_m15_candle_close
+
+    if is_new_m15_candle_close and conditionBuyLiquidity
+        if array.size(arrayBoxDem) > 0
+            lastBoxBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1 )
+            canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            int so_lan = array.get(arrayBoxDem_cham, array.size(arrayBoxDem_cham) - 1 )
+            
+            if not(low_nen_second < canhTrenLastBoxBull)
+                buy = label.new(bar_index-30,low_nen_second,'🍀', style=label.style_none, yloc = yloc.price, force_overlay = true)
+                array.push(arrayBuyLiquidity,low_nen_second)
+                array.push(arrayLabelBuy, buy)
+                giaNenTang = low_nen_second
+                array.push(arrayGiaNenTang, giaNenTang)
+        else 
+            buy = label.new(bar_index-30,low_nen_second,'🍀', style=label.style_none, yloc = yloc.price, force_overlay = true)
+            array.push(arrayBuyLiquidity,low_nen_second)
+            array.push(arrayLabelBuy, buy)
+            giaNenTang = low_nen_second
+            array.push(arrayGiaNenTang, giaNenTang)  
+            
+    // label.new(bar_index, high, str.tostring(muoi_bay_phut_time_out_sell_zone))
+    /////// Gia vuot qua dem thi tinh 17 phut or bo dem neu cham 2 lan
+    if array.size(arrayBoxDem) > 0
+        if low < canhDuoiLastBoxBull and muoi_bay_phut_time_out == 0
+            muoi_bay_phut_time_out += 1
+            label.new(bar_index, high, "Bắt đầu đếm 17 phút")
+        for i = array.size(arrayBoxDem) - 1 to 0 by 1
+            lastBoxBull = array.get(arrayBoxDem, i )
+            canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            int so_lan = array.get(arrayBoxDem_cham, i )
+
+            if  so_lan > 1
+                removePriceDemand := canhTrenLastBoxBull
+                array.remove(arrayBoxDem, i )
+                box.delete(lastBoxBull)
+                array.remove(arrayBoxDem_cham,  i )
+                array.remove(arrayBoxDem_status_touched,  i )
+                muoi_bay_phut_time_out := 0
+            
+            if muoi_bay_phut_time_out > 0 and array.size(arrayBoxBuyBase) > 0
+                array.remove(arrayBoxDem, i)
+                box.delete(lastBoxBull)
+                array.remove(arrayBoxDem_cham,  i )
+                array.remove(arrayBoxDem_status_touched,  i )            
+                muoi_bay_phut_time_out := 0
+            
+            if low < canhDuoiLastBoxBull and muoi_bay_phut_time_out == 0
+                muoi_bay_phut_time_out += 1
+                label.new(bar_index, high, "Bắt đầu đếm 17 phút")
+
+    if array.size(arrayBuyLiquidity) > 0
+        for i = array.size(arrayBuyLiquidity) - 1 to 0 by 1
+            BuyLiquidity = array.get(arrayBuyLiquidity, i)
+
+            if low < BuyLiquidity
+                if array.size(arrayBoxDem) > 0// muoi_bay_phut_time_out > 0 
+                    lastBoxBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1  )
+                    canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+                    canhTrenLastBoxBull := box.get_top(lastBoxBull)
+                    int so_lan = array.get(arrayBoxDem_cham, i)
+                    int status_touched = array.get(arrayBoxDem_status_touched, i)
+                    if low < canhDuoiLastBoxBull and muoi_bay_phut_time_out > 0
+                        muoi_bay_phut_time_out := 0
+                        demand_finding_buy_base := false 
+                        array.remove(arrayBoxDem,  array.size(arrayBoxDem) - 1 )
+                        box.delete(lastBoxBull)
+                        array.remove(arrayBoxDem_cham,  array.size(arrayBoxDem_cham) - 1 )
+                        array.remove(arrayBoxDem_status_touched,  array.size(arrayBoxDem_status_touched) - 1 )
+                        label.new(bar_index, high + 0.2, text = "Thoát setup do cross liquid, xóa demand zone cũ", force_overlay = true)
+                if array.size(arrayBoxBuyBase) > 0
+                    lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                    finding_entry_buy := false
+                    finding_entry_buy_time_out := 0
+                    finding_entry_buy_ten_minutes := 0
+                    array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                    array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                    box.delete(lastBoxBuyBaseBull)                     
+                    label.new(bar_index, high + 0.4, text = "Thoát setup do cross liquid, xóa buy base cũ", force_overlay = true)
+                    strategy.close_all()
+                    doi_sl_05R := false
+
+
+                if array.size(arrayBoxSellBase) > 0
+                    lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                    finding_entry_sell := false
+                    finding_entry_sell_ten_minutes := 0
+                    finding_entry_sell_time_out := 0
+                    array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+                    array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                    box.delete(lastBoxSellBaseBear)
+                    label.new(bar_index, high + 0.4, text = "Thoát setup sell do chạm liquid", color = color.red, force_overlay = true)
+                    strategy.close_all()
+                    doi_sl_05R_sell := false
+                    
+                removePrice := array.remove(arrayBuyLiquidity, i)
+                removeCandle_OpenPrice := open
+                removeLabel = array.remove(arrayLabelBuy, i)
+                label.delete(removeLabel)
+                liquid_finding_buy_base := true
+                demand_finding_buy_base := false
+                do_buy_base_2_lan := 0
+                if array.size(arrayBoxBuyBase) > 0 and (finding_entry_buy_ten_minutes > 0) 
+                    lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                    finding_entry_buy := false
+                    finding_entry_buy_ten_minutes := 0
+                    array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                    array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                    box.delete(lastBoxBuyBaseBull)
+                    strategy.close_all()
+                    doi_sl_05R := false
+                label.new(bar_index, high, "BuyLiquidity has been crossed " + str.tostring(removePrice), force_overlay = true)
+                alert("BuyLiquidity has been crossed " + str.tostring(removePrice), alert.freq_once_per_bar_close)
+                if array.size(arrayDemandLv2) > 1
+                    if low < array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )
+                        alert("BuyLiquidity lv 3 has been crossed "+ str.tostring(low), alert.freq_once_per_bar)
+                        label.new(bar_index, high + 1, text = "BuyLiquidity lv 3 has been crossed "+ str.tostring(low), force_overlay = true)
+                        array.pop(arrayDemandLv2)
+                else if array.size(arrayDemandLv1) > 1
+                    if low < array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )
+                        alert("BuyLiquidity lv 2 has been crossed "+ str.tostring(low), alert.freq_once_per_bar)
+                        label.new(bar_index, high, text = "BuyLiquidity lv 2 has been crossed "+ str.tostring(low), force_overlay = true)
+                        array.pop(arrayDemandLv1)
+                // else
+                //     alert("BuyLiquidity lv 1 has been crossed " + str.tostring(removePrice), alert.freq_once_per_bar)
+                //     label.new(bar_index, high + 0.5, text = "BuyLiquidity lv 1 has been crossed", force_overlay = true)
+    if  low < removePrice - 5
+        liquid_finding_buy_base := false
+        demand_finding_buy_base := false
+        removePrice := 0
+        finding_entry_buy := false 
+        finding_entry_buy_ten_minutes := 0
+        finding_entry_buy_time_out := 0
+        do_buy_base_2_lan := 0
+        label.new(bar_index, high, "Thoát 5 giá liquid")
+        if array.size(arrayBoxBuyBase) > 0
+            lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+            array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+            array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+            box.delete(lastBoxBuyBaseBull)
+            strategy.close_all()
+            doi_sl_05R := false
+    
+
+    // Case 2 tăng
+    if is_new_m15_candle_close and open_nen_second > close_nen_second and open_nen_third < close_nen_third and math.abs(low_nen_second - close_nen_second) > math.abs(close_nen_second - open_nen_second) and open_nen_second - close_nen_second <= 0.5*(close_nen_third - open_nen_third) and close_nen_third > high_nen_second and low_nen_second < low_nen_third and high_nen_second - open_nen_second < open_nen_second - close_nen_second and high_nen_third - close_nen_third < 0.25 * (close_nen_third - open_nen_third)
+        make_color_tang := true  
+        boxBull := box.new(bar_index-1, low_nen_third, last_bar_index, low_nen_second, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Case 2 tăng", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        array.push(arrayBoxDem, boxBull)
+
+
+        giaNenTang = low_nen_second
+        array.push(arrayGiaNenTang, giaNenTang)
+        // label.new(bar_index, low,str.tostring(giaNenTang))
+
+        array.push(arrayBoxDem_cham, 0)
+        array.push(arrayBoxDem_status_touched, 0)
+
+    // Case 4 tăng
+    // label.new(bar_index, high, str.tostring(open_nen_first)+" "+str.tostring(open_nen_second)+" "+str.tostring(open_nen_third))
+    if is_new_m15_candle_close and close_nen_first < open_nen_first and open_nen_second < close_nen_second and open_nen_third < close_nen_third and low_nen_third - low_nen_second > 1 and high_nen_third - close_nen_third < close_nen_third - open_nen_third and close_nen_third > open_nen_first and close_nen_first - low_nen_first < open_nen_first - close_nen_first
+        make_color_cho_rieng_case_4_tang := true
+        make_color_tang := true
+        boxBull := box.new(bar_index-1, low_nen_third, last_bar_index, low_nen_second, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Case 4 tăng", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        if array.size(arrayBoxDem) > 0
+            boxBull_before = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1)
+            if box.get_top(boxBull) > box.get_top(boxBull_before) and box.get_bottom(boxBull) < box.get_bottom(boxBull_before)
+                // Bo case cu truoc do
+                array.pop(arrayBoxDem)
+                box.delete(boxBull_before)
+                
+                if array.size(arrayGiaNenTang) > 0 
+                    array.pop(arrayGiaNenTang)
+                array.pop(arrayBoxDem_cham)
+                array.pop(arrayBoxDem_status_touched)
+            //Them case 4 vo
+            array.push(arrayBoxDem, boxBull)
+            giaNenTang = low_nen_second
+            array.push(arrayGiaNenTang, giaNenTang)
+            array.push(arrayBoxDem_cham, 0)
+            array.push(arrayBoxDem_status_touched, 0)
+
+        else 
+            array.push(arrayBoxDem, boxBull)
+            giaNenTang = low_nen_second
+            array.push(arrayGiaNenTang, giaNenTang)
+            array.push(arrayBoxDem_cham, 0)
+            array.push(arrayBoxDem_status_touched, 0)
+
+
+
+    // Case 5 tang
+    if is_new_m15_candle_close and open_nen_second > close_nen_second and open_nen_third < close_nen_third and low_nen_third < low_nen_second and close_nen_third > high_nen_second and open_nen_third - low_nen_third >= 0.5 * (close_nen_third - open_nen_third) and high_nen_third - close_nen_third >= 0.5 * (close_nen_third - open_nen_third) and low_nen_third - low_nen_second > 0.5
+        make_color_tang := true
+        boxBull := box.new(bar_index-1, low_nen_second, last_bar_index, low_nen_third, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Case 5 tăng", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        array.push(arrayBoxDem, boxBull)
+
+        giaNenTang = low_nen_third
+        array.push(arrayGiaNenTang, giaNenTang)  
+        // label.new(bar_index, low,str.tostring(giaNenTang))
+
+        array.push(arrayBoxDem_cham, 0)
+        array.push(arrayBoxDem_status_touched, 0)
+
+
+    // Line cho lv 1, 2, 3
+    if array.size(arrayGiaNenTang) > 0
+        for i = array.size(arrayGiaNenTang) - 1 to 0 by 1
+            giaNenTang = array.get(arrayGiaNenTang, i)
+            if giaNenTang > 0
+                newline = line.new(bar_index -3, giaNenTang, last_bar_index, giaNenTang, color = color.black, style = line.style_dotted, width = 2, force_overlay = true)  
+                array.push(arrayGiaTriCuaLineTang, newline)
+                array.remove(arrayGiaNenTang, i)
+
+
+    if is_new_m15_candle_close and array.size(arrayGiaTriCuaLineTang) > 0
+        for j = array.size(arrayGiaTriCuaLineTang) - 1 to 0 by 1
+            old_line = array.get(arrayGiaTriCuaLineTang, j)
+            // if TF_1_SL == 2404
+            //     label.new(bar_index, high, str.tostring(TF_1_SL))
+            // if line.get_y1(old_line) == 2404
+            //     label.new(bar_index, high, str.tostring(1))
+            if TF_1_SL == line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineTang, j)    
+                newline = line.new(bar_index -7, TF_1_SL, last_bar_index, TF_1_SL, color = color.green, width = 2, force_overlay = true)
+                array.push(arrayGiaTriCuaLineTang, newline)
+                arrayDemandLv1.push(TF_1_SL)    
+            
+            if TF_2_SL == line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineTang, j)    
+                newline = line.new(bar_index -7, TF_2_SL, last_bar_index, TF_2_SL, color = color.red, width = 2, force_overlay = true)
+                array.push(arrayGiaTriCuaLineTang, newline)
+                arrayDemandLv2.push(TF_2_SL)
+
+
+
+    // Box management
+
+
+
+    if array.size(arrayBoxDem) > 0
+        int i = array.size(arrayBoxDem) 
+        while i > 0
+            i -= 1
+            lastBoxBull = array.get(arrayBoxDem, i )
+            canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            int so_lan = array.get(arrayBoxDem_cham, i)
+            int status_touched = array.get(arrayBoxDem_status_touched, i)
+
+            if ( (low < canhTrenLastBoxBull and low > canhDuoiLastBoxBull) or (close < canhTrenLastBoxBull)  ) and not(make_color_tang) // and close > canhDuoiLastBoxBull) có gì để vô sau close < canhTrenLastBoxBull
+                // if array.size(arrayBoxBuyBase) > 0 and status_touched == 0
+                //     lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                //     finding_entry_buy := false
+                //     finding_entry_buy_ten_minutes := 0
+                //     finding_entry_buy_time_out := 0
+                //     array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                //     array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                //     box.delete(lastBoxBuyBaseBull)
+                //     label.new(bar_index, high + 1, text = "Xóa buy base cũ", force_overlay = true)
+                // if array.size(arrayBoxSellBase) > 0
+                //     lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                //     finding_entry_sell := false
+                //     finding_entry_sell_ten_minutes := 0
+                //     finding_entry_sell_ten_minutes := 0
+                //     array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+                //     array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                //     box.delete(lastBoxSellBaseBear)
+                //     label.new(bar_index, high + 0.4, text = "Thoát setup sell do chạm demand", force_overlay = true)
+                    
+                if so_lan == 1 and status_touched == 0
+                    if array.size(arrayBoxBuyBase) > 0 // and status_touched == 0
+                        lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                        finding_entry_buy := false
+                        finding_entry_buy_ten_minutes := 0
+                        finding_entry_buy_time_out := 0
+                        array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                        array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                        box.delete(lastBoxBuyBaseBull)
+                        label.new(bar_index, high + 1, text = "Xóa buy base cũ", color = color.red, force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R := false
+                    removeCandle_OpenPrice := open[2]
+                    liquid_finding_buy_base := false
+                    demand_finding_buy_base := true
+                    finding_entry_buy_time_out := 0
+                    so_lan := so_lan + 1
+                    alert("Demand Box "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                    label.new(bar_index, high + 0.4, text = "Demand zone "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", force_overlay = true)
+                    status_touched := 1
+
+                    if array.size(arrayDemandLv1) > 0
+                        LineLv1 = array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )
+                        if canhDuoiLastBoxBull == LineLv1
+                            alert("Demand Box Lv 2 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar)
+                            // label.new(bar_index, high, text = "Demand Box Lv 2 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            array.pop(arrayDemandLv1)
+                    if array.size(arrayDemandLv2) > 0                
+                        LineLv2 = array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )
+                        if canhDuoiLastBoxBull == LineLv2
+                            alert("Demand Box Lv 3 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                            // label.new(bar_index, high, text = "Demand Box Lv 3 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            array.pop(arrayDemandLv2)
+                    if array.size(arrayGiaTriCuaLineTang) > 1
+                        for j = array.size(arrayGiaTriCuaLineTang)-1 to 0 by 1
+                            old_line = array.get(arrayGiaTriCuaLineTang, j)    
+                            if canhDuoiLastBoxBull == line.get_y1(old_line)
+                                alert("Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                                // label.new(bar_index, high, text = "Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    array.set(arrayBoxDem_status_touched, i, status_touched)
+                    array.set(arrayBoxDem_cham, i, so_lan)
+                    lastBoxBull_da_thung = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1  )
+                    canhDuoiLastBoxBull_da_thung = box.get_bottom(lastBoxBull)
+                    canhTrenLastBoxBull_da_thung = box.get_top(lastBoxBull)
+
+                    if ( low < canhDuoiLastBoxBull_da_thung and i != array.size(arrayBoxDem) - 1 and low < canhDuoiLastBoxBull)
+                        muoi_bay_phut_time_out := 0
+                        // demand_finding_buy_base := false 
+                        // array.remove(arrayBoxDem,  array.size(arrayBoxDem) - 1 )
+                        array.pop(arrayBoxDem)
+                        array.pop(arrayBoxDem_cham)
+                        array.pop(arrayBoxDem_status_touched)
+                        box.delete(lastBoxBull_da_thung)
+                        // array.remove(arrayBoxDem_cham,  array.size(arrayBoxDem_cham) - 1 )
+                        // array.remove(arrayBoxDem_status_touched,  array.size(arrayBoxDem_status_touched) - 1 )
+                        label.new(bar_index, high + 1, text = "Xóa demand zone thủng", force_overlay = true)  
+                    break
+
+                else if so_lan == 0 and not(make_color_tang)
+                    if array.size(arrayBoxBuyBase) > 0 // and status_touched == 0
+                        lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                        finding_entry_buy := false
+                        finding_entry_buy_ten_minutes := 0
+                        finding_entry_buy_time_out := 0
+                        array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                        array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                        box.delete(lastBoxBuyBaseBull)
+                        label.new(bar_index, high + 1, text = "Xóa buy base cũ", force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R := false
+                    if array.size(arrayBoxSellBase) > 0
+                        lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                        finding_entry_sell := false
+                        finding_entry_sell_ten_minutes := 0
+                        finding_entry_sell_time_out := 0
+                        array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+                        array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                        box.delete(lastBoxSellBaseBear)
+                        label.new(bar_index, high + 0.4, text = "Thoát setup sell do chạm demand", color = color.red, force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R_sell := false
+                    removeCandle_OpenPrice := open[2]
+                    so_lan := so_lan + 1
+                    liquid_finding_buy_base := false
+                    demand_finding_buy_base := true
+                    finding_entry_buy_time_out := 0
+
+                    alert("Demand Box "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    label.new(bar_index, high + 0.2 , text = "Demand zone "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", force_overlay = true)
+                    status_touched := 1
+                    
+                    if array.size(arrayDemandLv1) > 0
+                        LineLv1 = array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )
+                        if canhDuoiLastBoxBull == LineLv1
+                            alert("Demand Box Lv2 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                            // label.new(bar_index, high, text = "Demand Box Lv2 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            // array.pop(arrayDemandLv1)
+                    if array.size(arrayDemandLv2) > 0                
+                        LineLv2 = array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )
+                        if canhDuoiLastBoxBull == LineLv2
+                            alert("Demand Box Lv3 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.",alert.freq_once_per_bar_close)
+                            // label.new(bar_index, high, text = "Demand Box Lv3 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            // array.pop(arrayDemandLv2)
+                    if array.size(arrayGiaTriCuaLineTang) > 1
+                        for j = array.size(arrayGiaTriCuaLineTang)-1 to 0 by 1
+                            old_line = array.get(arrayGiaTriCuaLineTang, j)    
+                            if canhDuoiLastBoxBull == line.get_y1(old_line)
+                                alert("Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                                // label.new(bar_index, high, text = "Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBull)+" - "+ str.tostring(canhDuoiLastBoxBull) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    array.set(arrayBoxDem_status_touched, i, status_touched)
+                    array.set(arrayBoxDem_cham, i, so_lan)
+
+                    lastBoxBull_da_thung = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1  )
+                    canhDuoiLastBoxBull_da_thung = box.get_bottom(lastBoxBull)
+                    canhTrenLastBoxBull_da_thung = box.get_top(lastBoxBull)
+                    if ( low < canhDuoiLastBoxBull_da_thung and i != array.size(arrayBoxDem) - 1 and low < canhDuoiLastBoxBull)
+                        muoi_bay_phut_time_out := 0
+                        // demand_finding_buy_base := false 
+                        // array.remove(arrayBoxDem,  array.size(arrayBoxDem) - 1 )
+                        array.pop(arrayBoxDem)
+                        array.pop(arrayBoxDem_cham)
+                        array.pop(arrayBoxDem_status_touched)
+                        box.delete(lastBoxBull_da_thung)
+                        // array.remove(arrayBoxDem_cham,  array.size(arrayBoxDem_cham) - 1 )
+                        // array.remove(arrayBoxDem_status_touched,  array.size(arrayBoxDem_status_touched) - 1 )
+                        label.new(bar_index, high + 1, text = "Xóa demand zone thủng", force_overlay = true)    
+                    // break          
+                // liquid_finding_buy_base := 0
+
+
+    if array.size(arrayBoxDem) > 0
+        for i = array.size(arrayBoxDem) - 1 to 0 by 1
+            lastBoxBull = array.get(arrayBoxDem, i )
+            canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            int so_lan = array.get(arrayBoxDem_cham, i)
+            int status_touched = array.get(arrayBoxDem_status_touched, i)
+
+            if is_new_m15_candle_close and (close_nen_third > canhTrenLastBoxBull or low_nen_third > canhTrenLastBoxBull) and open_nen_third < close_nen_third
+                if so_lan == 1 and ( status_touched == 1 or status_touched == -1 )
+                    array.set(arrayBoxDem_status_touched, i, 0)
+    
+
+    // label.new(bar_index, high, str.tostring(muoi_bay_phut_time_out))
+    if muoi_bay_phut_time_out > 0 
+        muoi_bay_phut_time_out += 1
+    
+    if muoi_bay_phut_time_out > 19
+        demand_finding_buy_base := false
+        muoi_bay_phut_time_out := 0
+        if array.size(arrayBoxDem) > 0
+            for i =  array.size(arrayBoxDem) - 1  to 0 by 1
+                lastBoxBull = array.get(arrayBoxDem, i )
+                canhDuoiLastBoxBull := box.get_bottom(lastBoxBull)
+                canhTrenLastBoxBull := box.get_top(lastBoxBull)
+                int so_lan = array.get(arrayBoxDem_cham, i)
+                int status_touched = array.get(arrayBoxDem_status_touched, i)
+                if low < canhDuoiLastBoxBull // or  so_lan > 0
+                    // removePriceDemand := canhDuoiLastBoxBull
+                    array.remove(arrayBoxDem, i)
+                    box.delete(lastBoxBull)
+                    array.remove(arrayBoxDem_cham, i)
+                    array.remove(arrayBoxDem_status_touched, i)
+                    label.new(bar_index, high, text = "Thoát setup do hết 17 phút, xóa demand zone cũ", force_overlay = true)
+
+
+
+    // if low < removePriceDemand - 5 and muoi_bay_phut_time_out > 0
+    //     demand_finding_buy_base := false
+    //     removePrice := 0
+    //     muoi_bay_phut_time_out := 0  
+    //     lastBoxBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1  )
+    //     canhDuoiLastBoxBull = box.get_bottom(lastBoxBull)
+    //     canhTrenLastBoxBull = box.get_top(lastBoxBull)
+    //     int so_lan = array.get(arrayBoxDem_cham, array.size(arrayBoxDem_cham) - 1 )
+    //     int status_touched = array.get(arrayBoxDem_status_touched, array.size(arrayBoxDem_status_touched) - 1)
+    //     if low < canhDuoiLastBoxBull 
+    //         removePriceDemand := canhDuoiLastBoxBull
+    //         array.remove(arrayBoxDem,  array.size(arrayBoxDem) - 1)
+    //         box.delete(lastBoxBull)
+    //         array.remove(arrayBoxDem_cham, array.size(arrayBoxDem_cham) - 1)
+    //         array.remove(arrayBoxDem_status_touched, array.size(arrayBoxDem_status_touched) - 1)
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+    if array.size(arrayGiaNenTang) > 0
+    
+        for i = array.size(arrayGiaNenTang) - 1 to 0 by 1
+        
+            giaNenTang = array.get(arrayGiaNenTang, i)
+            if low < giaNenTang
+                // label.new(bar_index, high, str.tostring(giaNenTang))
+                array.remove(arrayGiaNenTang, i)
+
+    if array.size(arrayGiaTriCuaLineTang) > 0
+        for j = array.size(arrayGiaTriCuaLineTang) - 1 to 0 by 1
+            old_line = array.get(arrayGiaTriCuaLineTang, j)
+            if low < line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineTang, j)
+                if array.size(arrayDemandLv2) > 0
+                    if low < array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )
+                        removePriceForLine := array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )
+                        alert("Demand line lv 2 has been crossed "+ str.tostring(array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )),alert.freq_once_per_bar_close)
+                        label.new(bar_index, high + 0.7, text = "Demand line lv 2 has been crossed "+ str.tostring(array.get(arrayDemandLv2, array.size(arrayDemandLv2) -1 )), force_overlay = true)
+                        array.pop(arrayDemandLv2)  
+                        liquid_finding_buy_base := true
+                        demand_finding_buy_base := false
+                        break
+                if array.size(arrayDemandLv1) > 0
+                    if low < array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )
+                        removePriceForLine := array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )
+                        alert("Demand line lv 1 has been crossed "+ str.tostring(array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )),alert.freq_once_per_bar_close)
+                        label.new(bar_index, high + 0.5, text = "Demand line lv 1 has been crossed "+ str.tostring(array.get(arrayDemandLv1, array.size(arrayDemandLv1) -1 )), force_overlay = true)
+                        array.pop(arrayDemandLv1)
+                        liquid_finding_buy_base := true
+                        demand_finding_buy_base := false
+                        break
+
+    if  low < removePriceForLine - 5
+        liquid_finding_buy_base := false
+        demand_finding_buy_base := false
+        removePriceForLine := 0
+        finding_entry_buy := false 
+        finding_entry_buy_ten_minutes := 0
+        finding_entry_buy_time_out := 0
+        do_buy_base_2_lan := 0
+        label.new(bar_index, high, "Thoát 5 giá liquid")
+        if array.size(arrayBoxBuyBase) > 0
+            lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+            array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+            array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+            box.delete(lastBoxBuyBaseBull)
+            strategy.close_all()
+            doi_sl_05R := false
+    //     if array.size(arrayBoxBuyBase) > 0
+    //         lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+    //         array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+    //         array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+    //         box.delete(lastBoxBuyBaseBull)
+                                
+
+    
+
+////////////////////// Buy Base ////////////
+
+    var arrayHighGiaNenGiam = array.new_float(0)
+
+
+    // Nến đỏ
+    if open[1] > close[1] and  close[1] - low[1] < (open[1] - close[1]) + 0.1 and high - open < 0.33 *(high[1] - close[1]) or (close[1] > open[1] and high[1] - close[1] > close[1] - open[1] and open[1] - low[1] < (close[1] - open[1]) + 0.1 and high - open <= 0.33 *(high[1] - open[1]) )
+        make_color_giam := true
+        array.push(arrayHighGiaNenGiam, high[1])
+        // array.push(arrayLowGiaNenGiam, low[1] + 1)
+        if array.size(arrayHighGiaNenGiam) > 9
+            array.shift(arrayHighGiaNenGiam)
+    if liquid_finding_buy_base and array.size(arrayHighGiaNenGiam) > 0
+        float x = 0
+        float y = 0
+        int k = 0 
+  
+        if high > array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1) or keep_finding_liquid_buy == true
+
+            if keep_finding_liquid_buy == false
+                index_of_high_nearest := 1
+
+                while high[index_of_high_nearest] != array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                    index_of_high_nearest += 1 
+                    if high[index_of_high_nearest] == array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                        break
+                // label.new(bar_index, high + index_of_high_nearest, str.tostring(index_of_high_nearest))
+
+            hai_phut_hon_liquid += 1
+            keep_finding_liquid_buy := true
+            // label.new(bar_index, high, str.tostring( array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1) ) +" "+str.tostring(hai_phut_hon_liquid))
+            if hai_phut_hon_liquid > 2
+                
+                // high_nearest = array.remove(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                // int index_of_high_nearest = 1
+                // while high[index_of_high_nearest] == high_nearest
+                //     index_of_high_nearest += 1
+                //     if  high[index_of_high_nearest] == high_nearest
+                //         break
+                hai_phut_hon_liquid := 0
+                keep_finding_liquid_buy := false
+                while array.size(arrayHighGiaNenGiam) > 0
+                    if high > array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1) 
+                        array.pop(arrayHighGiaNenGiam)
+                    else 
+                        break
+                for j = 0 to 5 by 1
+
+                    if removeCandle_OpenPrice == open[j]
+                        break
+                    // if index_of_high_nearest + 2 < j+2
+                    //     label.new(bar_index + j, high, "1")
+
+                    //     break
+                    if liquid_finding_buy_base
+                        x := 0
+                        y := 0
+                        k := -1
+                        // if open[1] > close[1] and  close[1] - low[1] < (open[1] - close[1]) + 0.1 and high - open < 0.33 *(high[1] - close[1]) or (close[1] > open[1] and high[1] - close[1] > close[1] - open[1] and open[1] - low[1] < (close[1] - open[1]) + 0.1 and high - open <= 0.33 *(high[1] - open[1])) 
+                        // if close[1] > open[1] and high[1] - close[1] < (close[1] - open[1]) + 0.1 and open - low < 0.33 *(close[1] - low[1]) or (open[1] > close[1] and close[1] - low[1] > open[1] - close[1] and high[1] - open[1] < open[1] - close[1] + 0.1 and open - low <= 0.33 *(open[1] - low[1]))
+                            //not(2779.42 > 2778.79 and 0.14 < 0.63 and 0.1 < 0.33 *(2779.42 - 2778.79) or (open[j+2] > close[j+2] and close[j+2] - low[j+2] > open[j+2] - close[j+2] and high[j+2] - open[j+2] < (open[j+2] - close[j+2]) + 0.1 and open[j+1] - low[j+1] <= 0.33 *(open[j+2] - low[j+2]) )  )                                                                                                                                                                                                                                                                                                                                                      
+                        if ( close[j+1] > open[j+1] and high[j+1] - close[j+1] < (close[j+1] - open[j+1]) + 0.1 and open[j] - low[j] < 0.33 *(close[j+1] - low[j+1]) or (open[j+1] > close[j+1] and close[j+1] - low[j+1] > open[j+1] - close[j+1] and high[j+1] - open[j+1] < (open[j+1] - close[j+1]) + 0.1 and open[j] - low[j] <= 0.33 *(open[j+1] - low[j+1]) ) ) and not(  ( close[j+2] > open[j+2] and high[j+2] - close[j+2] < (close[j+2] - open[j+2]) + 0.1 and open[j+1] - low[j+1] < 0.33 *(close[j+2] - low[j+2]) ) or (open[j+2] > close[j+2] and close[j+2] - low[j+2] > open[j+2] - close[j+2] and high[j+2] - open[j+2] < (open[j+2] - close[j+2]) + 0.1 and open[j+1] - low[j+1] <= 0.33 *(open[j+2] - low[j+2]) )  ) 
+                            // label.new(bar_index, high+j+1, str.tostring(close[j+2]) +"  "+str.tostring(low[j+2]) +" "+ str.tostring(open[j+2]) +" "+str.tostring(high[j+2]))                       
+                            
+                            if low[j+1] < low[j+2]
+                                x := low[j+1]
+                                k := j+2
+
+                            else 
+                                x := low[j+2]  
+                                k := j+2
+                                
+                            
+                            if x != 0 and k >= 2 
+                                if low[k-2] - high[k] > 0.05 and open[k - 1] < close[k - 1]
+                                    y := low[k - 2]               
+                            if x != 0 and k >= 3 
+                                if low[k - 3] - high[k - 1] > 0.05 and open[k - 2] < close[k - 2]
+                                    y := low[k - 3]
+                            if x != 0 and k >= 4 
+                                if y == low[k - 3] and  low[k - 4] - high[k - 2] > 0.05 and open[k - 3] < close[k - 3]
+                                    y := low[k - 4]     
+
+                            if x != 0 and y != 0 
+                                boxBull := box.new(bar_index-1, y, last_bar_index, x, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Buy base", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+                                array.push(arrayBoxBuyBase, boxBull)
+                                liquid_finding_buy_base := false
+                                label.new(bar_index, high+0.5, "Buybase "+ str.tostring(x)+"-"+str.tostring(y), force_overlay = true)
+                                alert("Buybase "+ str.tostring(x)+"-"+str.tostring(y)+" has been created.", alert.freq_once_per_bar_close)
+                                making_buy_base := true
+                                finding_entry_buy_time_out := index_of_high_nearest + 2
+                                array.push(mang_so_lan_cham_buy_base, 0)
+                                do_buy_base_2_lan += 1
+
+
+
+    // if array.size(arrayBoxDem_status_touched) > 0
+    //     int status_touched = array.get(arrayBoxDem_status_touched, array.size(arrayBoxDem_status_touched)-1)
+    //     label.new(bar_index, high, str.tostring(status_touched))
+    if demand_finding_buy_base == true and array.size(arrayHighGiaNenGiam) > 0 
+        float x = 0
+        float y = 0
+        int k = 0
+        if high > array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)  or keep_finding_demand == true
+            if keep_finding_demand == false
+                index_of_high_nearest := 1
+                while high[index_of_high_nearest] != array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                    index_of_high_nearest += 1 
+                    if high[index_of_high_nearest] == array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                        break
+            keep_finding_demand := true
+            hai_phut_hon_demand += 1
+            if hai_phut_hon_demand > 2
+
+                high_nearest = array.remove(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1)
+                hai_phut_hon_demand := 0
+                keep_finding_demand := false
+                while array.size(arrayHighGiaNenGiam) > 0
+                    if high > array.get(arrayHighGiaNenGiam, array.size(arrayHighGiaNenGiam) - 1) 
+                        array.pop(arrayHighGiaNenGiam)
+                    else 
+                        break
+                
+                for j = 0 to 5 by 1
+
+                    if removeCandle_OpenPrice == open[j]
+                        break
+                    // if index_of_high_nearest + 2 < j+2
+                    //     break
+                    if demand_finding_buy_base == true    
+                        x := 0
+                        y := 0
+                        k := -1        
+                                                                                                                                                                                                                                                                                             
+                        if ( close[j+1] > open[j+1] and high[j+1] - close[j+1] < (close[j+1] - open[j+1]) + 0.1 and open[j] - low[j] < 0.33 *(close[j+1] - low[j+1]) or (open[j+1] > close[j+1] and close[j+1] - low[j+1] > open[j+1] - close[j+1] and high[j+1] - open[j+1] < (open[j+1] - close[j+1]) + 0.1 and open[j] - low[j] <= 0.33 *(open[j+1] - low[j+1]) ) ) and not(  ( close[j+2] > open[j+2] and high[j+2] - close[j+2] < (close[j+2] - open[j+2]) + 0.1 and open[j+1] - low[j+1] < 0.33 *(close[j+2] - low[j+2]) ) or (open[j+2] > close[j+2] and close[j+2] - low[j+2] > open[j+2] - close[j+2] and high[j+2] - open[j+2] < (open[j+2] - close[j+2]) + 0.1 and open[j+1] - low[j+1] <= 0.33 *(open[j+2] - low[j+2]) )  ) // and high_nearest >= high[j+2]
+                            
+                            //if close[j+1] > open[j+1] and high[j+1] - close[j+1] < (close[j+1] - open[j+1]) + 0.1 and open[j] - low[j] < 0.33 *(close[j+1] - low[j+1]) or (open[j+1] > close[j+1] and close[j+1] - low[j+1] > open[j+1] - close[j+1] and high[j+1] - open[j+1] < open[j+1] - close[j+1] + 0.1 and open[j] - low[j] <= 0.33 *(open[j+1] - low[j+1])) and not(close[j+2] > open[j+2] and high[j+2] - close[j+2] < (close[j+2] - open[j+2]) + 0.1 and open[j+1] - low[j+1] < 0.33 *(close[j+2] - low[j+2]) or (open[j+2] > close[j+2] and close[j+2] - low[j+2] > open[j+2] - close[j+2] and high[j+2] - open[j+2] < open[j+2] - close[j+2] + 0.1 and open[j+1] - low[j+1] <= 0.33 *(open[j+2] - low[j+2])))
+                            if low[j+1] < low[j+2]
+                                x := low[j+1]
+                                k := j+2
+
+                            else 
+                                x := low[j+2]  
+                                k := j+2
+
+                            if x != 0 and k >= 2 
+                                if low[k-2] - high[k] > 0.05 and open[k - 1] < close[k - 1]
+                                    y := low[k - 2]
+                                    
+
+                            if x != 0 and k >= 3 
+                                if low[k - 3] - high[k - 1] > 0.05 and open[k - 2] < close[k - 2]
+                                    y := low[k - 3]                        
+                            if x != 0 and k >= 4 
+                                if y == low[k - 3] and low[k - 4] - high[k - 2]  > 0.05 and open[k - 3] < close[k - 3]
+                                    y := low[k - 4]
+
+                            if array.size(arrayBoxDem) > 0
+                                lastBoxBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1)
+                                canhTrenLastBoxBull := box.get_top(lastBoxBull)
+                                if low - canhTrenLastBoxBull > low - removePriceDemand
+                                    // label.new(bar_index, high, str.tostring(removePriceDemand) +" "+str.tostring(canhTrenLastBoxBull))
+                                    canhTrenLastBoxBull := removePriceDemand
+                            else
+                                if removePriceDemand != 0 
+                                    canhTrenLastBoxBull := removePriceDemand
+                                else
+                                    canhTrenLastBoxBull := 100000
+                            //   label.new(bar_index, high, str.tostring(canhTrenLastBoxBull) +" "+str.tostring(x))
+
+                            if x != 0 and y != 0 and x < canhTrenLastBoxBull + 0.5
+                                boxBull := box.new(bar_index-1, y, last_bar_index, x, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Buy base", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+                                array.push(arrayBoxBuyBase, boxBull)
+                                demand_finding_buy_base := false
+                                label.new(bar_index, high+0.5, "Buybase "+ str.tostring(x)+"-"+str.tostring(y), force_overlay = true)
+                                alert("Buybase "+ str.tostring(x)+"-"+str.tostring(y)+" has been created.", alert.freq_once_per_bar_close)
+                                making_buy_base := true
+                                finding_entry_buy_time_out := index_of_high_nearest + 2
+                                array.push(mang_so_lan_cham_buy_base, 0)
+                                do_buy_base_2_lan += 1
+                            // else if x != 0 and y != 0
+                            //     boxBull := box.new(bar_index-1, y, last_bar_index, x, border_color = color.green, bgcolor = color.rgb(76,176,80,80), text = "Buy base", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+                            //     array.push(arrayBoxBuyBase, boxBull)
+                            //     demand_finding_buy_base := false
+                            //     label.new(bar_index, high+0.5, "Buybase setup 3 "+ str.tostring(x)+"-"+str.tostring(y))
+                            //     alert("Buybase setup 3 "+ str.tostring(x)+"-"+str.tostring(y)+" has been created.", alert.freq_once_per_bar_close)
+                            //     making_buy_base := true
+                            //     finding_entry_buy_time_out := index_of_high_nearest + 2
+                            //     array.push(mang_so_lan_cham_buy_base, 0)
+    if finding_entry_buy_time_out > 0
+        finding_entry_buy_time_out += 1
+    
+    // label.new(bar_index, high+1, text = str.tostring(finding_entry_buy) )
+
+    if finding_entry_buy_time_out > 60 and array.size(arrayBoxBuyBase) > 0 and finding_entry_buy == true
+        // lastBoxBull = array.get(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1)
+        // canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        // array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+        // array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+        // box.delete(lastBoxBull) 
+        for i = array.size(arrayBoxBuyBase)-1 to 0 by 1
+            lastBoxBull = array.get(arrayBoxBuyBase, i)
+            array.remove(arrayBoxBuyBase, i )
+            array.remove(mang_so_lan_cham_buy_base, i)
+            box.delete(lastBoxBull)  
+            strategy.close_all()   
+            doi_sl_05R := false
+        finding_entry_buy_ten_minutes := 0
+        finding_entry_buy := false        
+        label.new(bar_index, high, text = "Thoát setup do hết 60 phút, xóa buy base cũ.", force_overlay = true)
+        finding_entry_buy_time_out := 0
+        demand_finding_buy_base := false
+        liquid_finding_buy_base := false 
+    if finding_entry_buy_time_out > 80 and finding_entry_buy == false
+        if  array.size(arrayBoxBuyBase) > 0 
+            lastBoxBull = array.get(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1)
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+            array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+            box.delete(lastBoxBull) 
+            strategy.close_all()  
+            doi_sl_05R := false
+        finding_entry_buy_ten_minutes := 0
+        finding_entry_buy := false  
+        demand_finding_buy_base := false
+        liquid_finding_buy_base := false      
+        label.new(bar_index, high, text = "Thoát setup do hết 80 phút, xóa buy base cũ.", force_overlay = true)
+        finding_entry_buy_time_out := 0
+
+    
+    if array.size(arrayBoxBuyBase) > 0
+        lastBoxBull = array.get(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1)
+        canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+        so_lan_cham_buy_base = array.get(mang_so_lan_cham_buy_base,  array.size(mang_so_lan_cham_buy_base) - 1)
+        // label.new(bar_index, high, str.tostring(canhDuoiLastBoxBull) )
+        // label.new(bar_index, high, str.tostring(open < close) +" "+str.tostring(finding_entry == false))
+        // label.new(bar_index, high, str.tostring(so_lan_cham_buy_base) )
+        if ( (close < canhTrenLastBoxBull and close > canhDuoiLastBoxBullBase) or (low < canhTrenLastBoxBull and low > canhDuoiLastBoxBullBase) ) and finding_entry_buy == false and not(making_buy_base) and so_lan_cham_buy_base == 0 // and open > close
+            so_lan_cham_buy_base += 1
+            array.set(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1, so_lan_cham_buy_base) 
+            finding_entry_buy := true
+            label.new(bar_index, high, text ="Buy base cham lan thu "+ str.tostring(so_lan_cham_buy_base), force_overlay = true)
+            alert("Buy base cham lan thu "+ str.tostring(so_lan_cham_buy_base), alert.freq_once_per_bar_close)
+
+    // label.new(bar_index, high, str.tostring(finding_entry_buy_ten_minutes))
+    if array.size(arrayBoxBuyBase) > 0
+        lastBoxBull = array.get(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+        canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+        if low < canhDuoiLastBoxBullBase - 0.5 and finding_entry_buy_ten_minutes == 0
+            // box.set_right(lastBoxBull, bar_index)
+            // box.set_extend(lastBoxBull, extend.none)
+            // array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1)
+            // box.delete(lastBoxBull)
+            finding_entry_buy_ten_minutes += 1
+            finding_entry_buy := true
+            label.new(bar_index, high, text = "Bắt đầu đếm 10 phút.", force_overlay = true)            
+    // label.new(bar_index, high, str.tostring(finding_entry_buy))
+    if finding_entry_buy == true and is_within_timerange and array.size(arrayBoxBuyBase) > 0
+        lastBoxBull = array.get(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+        canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+        if finding_entry_buy_ten_minutes <= 0
+            // label.new(bar_index, high, str.tostring(( close > close[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60 and open[1] > close[1]) )
+            if open < close  and math.min(low, low[1], low[2] ) < canhTrenLastBoxBull + 0.5
+                if open[2] > close[2] 
+                    if ( close >= open[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60
+                        float sellLiquidity_entry = 200000
+                        float canhDuoiLastBoxSell_entry = 200000
+                        if array.size(arrayBoxSup) > 0
+                            lastBoxSell = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+                            canhDuoiLastBoxSell_entry := lastBoxSell.get_bottom()
+                        if array.size(arraySellLiquidity) > 0
+                            sellLiquidity_entry := array.get(arraySellLiquidity, array.size(arraySellLiquidity) - 1)
+                        closest_tp_buy = math.min(canhDuoiLastBoxSell_entry, sellLiquidity_entry)
+
+                        if close + (close - canhDuoiLastBoxBullBase +0.5) < closest_tp_buy
+                            closest_tp_buy := close + 2*(close - canhDuoiLastBoxBullBase + 0.5) < closest_tp_buy ? close + 2*(close - canhDuoiLastBoxBullBase + 0.5) : closest_tp_buy                            
+                            alert("Enrty buy has been created :"+ str.tostring(close), alert.freq_once_per_bar_close )
+                            finding_entry_buy := false
+                            tp_line_buy := line.new(bar_index - 5, closest_tp_buy, bar_index + 50, closest_tp_buy, color = color.black, force_overlay = true)
+                            tp_text_buy := label.new(bar_index + 5, closest_tp_buy, color = color.white, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true )
+                            sl_line_buy := line.new(bar_index - 5, canhDuoiLastBoxBullBase - 0.5, bar_index + 50, canhDuoiLastBoxBullBase - 0.5, color = color.purple, force_overlay = true)
+                            sl_text_buy := label.new(bar_index + 5, canhDuoiLastBoxBullBase - 0.5, text = "SL", textcolor = color.purple, style = label.style_none)
+                            takeProfitPrice = closest_tp_buy
+                            stopLossPrice = canhDuoiLastBoxBullBase - 0.5  
+                            entry_price := close
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Long", strategy.long, qty = lot_size)
+                            strategy.exit("Exit Long", from_entry="Long", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.2, text = "Entry buy has been created :"+ str.tostring(close) +" TP: "+str.tostring(closest_tp_buy)+" Sl: "+str.tostring(sl_buy - 0.5) +" Qty: " + str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R := true
+
+                else if open[1] > close[1] and open[2] < close[2]
+                    if ( close >= close[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60
+                        float sellLiquidity_entry = 200000
+                        float canhDuoiLastBoxSell_entry = 200000
+                        if array.size(arrayBoxSup) > 0
+                            lastBoxSell = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+                            canhDuoiLastBoxSell_entry := lastBoxSell.get_bottom()
+                        if array.size(arraySellLiquidity) > 0
+                            sellLiquidity_entry := array.get(arraySellLiquidity, array.size(arraySellLiquidity) - 1)
+                        closest_tp_buy = math.min(canhDuoiLastBoxSell_entry, sellLiquidity_entry)
+
+                        // label.new(bar_index, high, str.tostring(close + (close - canhDuoiLastBoxBullBase + 0.5)) +" "+ str.tostring(closest_tp_buy))
+                        if close + (close - canhDuoiLastBoxBullBase +0.5) < closest_tp_buy
+                            closest_tp_buy := close + 2*(close - canhDuoiLastBoxBullBase + 0.5) < closest_tp_buy ? close + 2*(close - canhDuoiLastBoxBullBase + 0.5) : closest_tp_buy
+                            tp_line_buy := line.new(bar_index - 5, closest_tp_buy, bar_index + 50, closest_tp_buy, color = color.black, force_overlay = true)
+                            tp_text_buy := label.new(bar_index, closest_tp_buy, color = color.white, text = "TP", textcolor = color.black, force_overlay = true )
+                            sl_line_buy := line.new(bar_index - 5, canhDuoiLastBoxBullBase - 0.5, bar_index + 50, canhDuoiLastBoxBullBase - 0.5, color = color.purple, force_overlay = true)
+                            sl_text_buy := label.new(bar_index, canhDuoiLastBoxBullBase - 0.5, text = "SL", textcolor = color.purple, style = label.style_none)
+                            alert("Enrty buy has been created :"+ str.tostring(close), alert.freq_once_per_bar_close )
+                            label.new(bar_index, high + 0.2, text = "Entry buy has been created :"+ str.tostring(close) +" TP: "+str.tostring(closest_tp_buy)+" Sl: "+str.tostring(canhDuoiLastBoxBullBase - 0.5), force_overlay = true)
+                            finding_entry_buy := false
+                            takeProfitPrice = closest_tp_buy
+                            stopLossPrice = canhDuoiLastBoxBullBase - 0.5  
+                            entry_price := close
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Long", strategy.long, qty = lot_size)
+                            strategy.exit("Exit Long", from_entry="Long", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.2, text = "Entry buy has been created :"+ str.tostring(close) +" TP: "+str.tostring(closest_tp_buy)+" Sl: "+str.tostring(canhDuoiLastBoxBullBase - 0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R := true
+
+        else if finding_entry_buy_ten_minutes > 0
+           // label.new(bar_index, high, str.tostring(( close > close[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60 and open[1] > close[1]) )
+            if open < close  and math.min(low, low[1], low[2] ) < canhTrenLastBoxBull + 0.5
+                if open[2] > close[2] 
+                    if ( close >= open[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60
+                        float sellLiquidity_entry = 200000
+                        float canhDuoiLastBoxBear_entry = 200000
+                        if array.size(arrayBoxSup) > 0
+                            lastBoxSellBear = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+                            canhDuoiLastBoxBear_entry := lastBoxSellBear.get_bottom()
+                        if array.size(arraySellLiquidity) > 0
+                            sellLiquidity_entry := array.get(arraySellLiquidity, array.size(arraySellLiquidity) - 1)
+                        closest_tp_buy = math.min(canhDuoiLastBoxBear_entry, sellLiquidity_entry)
+                        // label.new(bar_index, high, str.tostring(close + (close - sl_buy + 0.5)) +" "+ str.tostring(closest_tp_buy))
+
+                        if close + (close - sl_buy + 0.5) < closest_tp_buy
+                            closest_tp_buy := close + 2*(close - sl_buy + 0.5) < closest_tp_buy ? close + 2*(close - sl_buy + 0.5) : closest_tp_buy
+                            alert("Enrty buy has been created :"+ str.tostring(close), alert.freq_once_per_bar_close )
+                            finding_entry_buy := false
+                            tp_line_buy := line.new(bar_index - 5, closest_tp_buy, bar_index + 50, closest_tp_buy, color = color.black, force_overlay = true)
+                            tp_text_buy := label.new(bar_index + 5, closest_tp_buy, color = color.white, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true )
+                            sl_line_buy := line.new(bar_index - 5, sl_buy - 0.5, bar_index + 50, sl_buy - 0.5, color = color.purple, force_overlay = true)
+                            sl_text_buy := label.new(bar_index + 5, sl_buy - 0.5, text = "SL", textcolor = color.purple, style = label.style_none)
+                            entry_price := close
+                            takeProfitPrice = closest_tp_buy
+                            stopLossPrice = sl_buy - 0.5
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Long", strategy.long, qty = lot_size)
+                            strategy.exit("Exit Long", from_entry="Long", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.2, text = "Entry buy has been created :"+ str.tostring(close) +" TP: "+str.tostring(closest_tp_buy)+" Sl: "+str.tostring(sl_buy -0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R := true
+
+                else if open[1] > close[1] and open[2] < close[2]
+                    if ( close >= close[2] ) and high - close < close - open and ADX < 30 and finding_entry_buy_time_out <= 60
+                        float sellLiquidity_entry = 200000
+                        float canhDuoiLastBoxSell_entry = 200000
+                        if array.size(arrayBoxSup) > 0
+                            lastBoxSell = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+                            canhDuoiLastBoxSell_entry := lastBoxSell.get_bottom()
+                        if array.size(arraySellLiquidity) > 0
+                            sellLiquidity_entry := array.get(arraySellLiquidity, array.size(arraySellLiquidity) - 1)
+                        closest_tp_buy = math.min(canhDuoiLastBoxSell_entry, sellLiquidity_entry)
+                        // label.new(bar_index, high, str.tostring(close + (close - canhDuoiLastBoxBullBase + 0.5)) +" "+ str.tostring(closest_tp_buy))
+                        if close + (close - sl_buy + 0.5) < closest_tp_buy
+                            closest_tp_buy := close + 2*(close - sl_buy + 0.5) < closest_tp_buy ? close + 2*(close - sl_buy + 0.5) : closest_tp_buy
+                            tp_line_buy := line.new(bar_index - 5, closest_tp_buy, bar_index + 50, closest_tp_buy, color = color.black, force_overlay = true)
+                            tp_text_buy := label.new(bar_index, closest_tp_buy, color = color.white, text = "TP", textcolor = color.black, force_overlay = true )
+                            sl_line_buy := line.new(bar_index - 5, sl_buy - 0.5, bar_index + 50, sl_buy - 0.5, color = color.purple, force_overlay = true)
+                            sl_text_buy := label.new(bar_index, sl_buy - 0.5, text = "SL", textcolor = color.purple, style = label.style_none)
+                            alert("Enrty buy has been created :"+ str.tostring(close), alert.freq_once_per_bar_close )
+                            finding_entry_buy := false
+                            entry_price := close
+                            takeProfitPrice = closest_tp_buy
+                            stopLossPrice = sl_buy - 0.5
+
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Long", strategy.long, qty = lot_size)
+                            strategy.exit("Exit Long", from_entry="Long", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.2, text = "Entry buy has been created :"+ str.tostring(close) +" TP: "+str.tostring(closest_tp_buy)+" Sl: "+str.tostring(sl_buy- 0.5) +" Qty: " +str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R := true
+                        
+    if not(na(tp_line_buy))
+        sl = line.get_y1(sl_line_buy)
+        if array.size(arrayBoxSup) > 0
+            lastBoxBear = array.get(arrayBoxSup,  array.size(arrayBoxSup) - 1 )
+            canhTrenLastBoxSup = box.get_top(lastBoxBear)
+            canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+            if math.abs( canhDuoiLastBoxBear - entry_price ) < math.abs( entry_price - sl ) 
+                strategy.close_all()
+                doi_sl_05R := false
+                line.delete(tp_line_buy)
+                line.delete(sl_line_buy)
+                label.delete(tp_text_buy)
+                label.delete(sl_text_buy)
+                label.new(bar_index, high + 1, "Đóng lệnh buy.", color = color.red)
+        if array.size(arrayGiaTriCuaLineGiam) > 0
+            lineGiam = array.get(arrayGiaTriCuaLineGiam, array.size(arrayGiaTriCuaLineGiam) - 1 )
+            lineGiam_price = line.get_y1(lineGiam)
+            if math.abs( lineGiam_price - entry_price ) < math.abs( entry_price - sl ) 
+                strategy.close_all()
+                doi_sl_05R := false
+                line.delete(tp_line_sell)
+                line.delete(sl_line_sell)
+                label.delete(tp_text_sell)
+                label.delete(sl_text_sell)
+                label.new(bar_index, high + 1, "Đóng lệnh buy.",color = color.red) 
+        
+        if high > entry_price + (entry_price - sl) * 1.5 and doi_sl_05R
+            line.set_y1(sl_line_buy, entry_price + (entry_price - sl) * 0.5)
+            line.set_y2(sl_line_buy, entry_price + (entry_price - sl) * 0.5)
+            label.set_y(sl_text_buy,  entry_price + (entry_price - sl) * 0.5)
+            doi_sl_05R := false
+            strategy.exit("Exit Long", from_entry="Long", limit=line.get_y1(tp_line_buy), stop= entry_price + (entry_price - sl) * 0.5)
+
+        if high > line.get_y1(tp_line_buy) and open < close
+            line.delete(tp_line_buy)
+            line.delete(sl_line_buy)
+            label.delete(tp_text_buy)
+            label.delete(sl_text_buy)
+
+        if low < line.get_y1(sl_line_buy) and open > close
+            line.delete(tp_line_buy)
+            line.delete(sl_line_buy)
+            label.delete(tp_text_buy)
+            label.delete(sl_text_buy) 
+           
+    if finding_entry_buy_ten_minutes > 10
+        lastBoxBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+        canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+        if low < canhDuoiLastBoxBullBase - 0.5 or na(tp_line_buy) // or finding_entry_buy == true
+            finding_entry_buy := false
+            finding_entry_buy_time_out := 0
+            finding_entry_buy_ten_minutes := 0
+            array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+            array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+            box.delete(lastBoxBull)   
+            strategy.close_all() 
+            line.delete(tp_line_buy)
+            line.delete(sl_line_buy)
+            label.delete(tp_text_buy)
+            label.delete(sl_text_buy)
+            doi_sl_05R := false
+
+            label.new(bar_index, high, text = "Hết 10 phút, xóa buy base cũ", force_overlay = true)
+            if do_buy_base_2_lan == 1
+                label.new(bar_index + 1, high + 0.5, text = "Bắt đầu dò buy base mới", force_overlay = true)
+                do_buy_base_2_lan += 1  
+                liquid_finding_buy_base := true 
+        else 
+            label.new(bar_index, high, text = "10 phút an toàn, set up buy base được tiếp tục", force_overlay = true)
+            finding_entry_buy_ten_minutes := 0
+            finding_entry_buy := false 
+    else if finding_entry_buy_ten_minutes > 0
+        finding_entry_buy_ten_minutes += 1
+
+    if array.size(arrayBoxBuyBase) > 0
+        lastBoxBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+        canhTrenLastBoxBull := box.get_top(lastBoxBull)
+        canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+        if low <= canhDuoiLastBoxBullBase - (canhTrenLastBoxBull - canhDuoiLastBoxBullBase)
+            finding_entry_buy := false
+            finding_entry_buy_time_out := 0
+            finding_entry_buy_ten_minutes := 0
+            array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+            array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+            box.delete(lastBoxBull)   
+            strategy.close_all()
+            doi_sl_05R := false
+            label.new(bar_index, high, text = "Chạm cản buy base, xóa buy base cũ", force_overlay = true)  
+            if do_buy_base_2_lan == 1
+                do_buy_base_2_lan += 1  
+                liquid_finding_buy_base := false
+                demand_finding_buy_base := true
+                label.new(bar_index + 1, high + 0.5, text = "Bắt đầu dò buy base mới", force_overlay = true)
+            
+    making_buy_base := false
+    make_color_tang := false
+        
+
+
+
+
+
+
+
+
+if array.size(m15_closes) > 2
+
+
+    index = array.size(m15_closes) - 1 
+    high_nen_first = array.get(m15_highs, index - 2)
+    high_nen_second = array.get(m15_highs, index - 1)
+    high_nen_third = array.get(m15_highs, index)
+
+    close_nen_first = array.get(m15_closes, index - 2)
+    close_nen_second = array.get(m15_closes, index - 1)
+    close_nen_third = array.get(m15_closes, index)
+
+    open_nen_first = array.get(m15_opens, index - 2)
+    open_nen_second = array.get(m15_opens, index - 1)
+    open_nen_third = array.get(m15_opens, index)
+
+    low_nen_first = array.get(m15_lows, index - 2)
+    low_nen_second = array.get(m15_lows, index - 1)
+    low_nen_third = array.get(m15_lows, index)
+
+    conditionSellLiquidity = (high_nen_second > high_nen_first) and (high_nen_second > high_nen_third) and (close_nen_third < open_nen_first - diff) and is_new_m15_candle_close
+
+    if is_new_m15_candle_close and conditionSellLiquidity
+        if array.size(arrayBoxSup) > 0
+            lastBoxBear = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+            canhTrenLastBoxBear := box.get_top(lastBoxBear)
+            canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+            int so_lan = array.get(arrayBoxSup_cham, array.size(arrayBoxSup_cham) - 1 )
+            
+            if not(high_nen_second > canhDuoiLastBoxBear)
+                sell = label.new(bar_index-30,high_nen_second,'🧲', style=label.style_none, yloc = yloc.price, force_overlay = true)
+                array.push(arraySellLiquidity,high_nen_second)
+                array.push(arrayLabelSell, sell)
+                giaNenGiam = high_nen_second
+                array.push(arrayGiaNenGiam, giaNenGiam)
+        else
+            sell = label.new(bar_index-30,high_nen_second,'🧲', style=label.style_none, yloc = yloc.price, force_overlay = true)
+            array.push(arraySellLiquidity,high_nen_second)
+            array.push(arrayLabelSell, sell)
+            giaNenGiam = high_nen_second
+            array.push(arrayGiaNenGiam, giaNenGiam)
+    // label.new(bar_index, high, str.tostring(muoi_bay_phut_time_out_sell_zone))
+
+
+            
+            // label.new(bar_index, high, str.tostring(finding_entry_sell_time_out))
+
+    if array.size(arraySellLiquidity) > 0
+        for i = array.size(arraySellLiquidity) - 1 to 0 by 1
+            SellLiquidity = array.get(arraySellLiquidity, i)
+           
+
+            if high > SellLiquidity
+                removePrice_sell_zone := 10000
+                if array.size(arrayBoxSup) > 0
+                    lastBoxBear = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1  )
+                    canhTrenLastBoxBear := box.get_top(lastBoxBear)
+                    canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+                    so_lan_cham_supply = array.get(arrayBoxSup_cham, array.size(arrayBoxSup_cham) - 1)
+                    status_touched = array.get(arrayBoxSup_status_touched, array.size(arrayBoxSup_status_touched) - 1 )
+                    if high > canhTrenLastBoxBear
+                        array.remove(arrayBoxSup,  array.size(arrayBoxSup) - 1 )
+                        box.delete(lastBoxBear)
+                        array.remove(arrayBoxSup_cham,  array.size(arrayBoxSup_cham) - 1 )
+                        array.remove(arrayBoxSup_status_touched,  array.size(arrayBoxSup_status_touched) - 1 )
+                        label.new(bar_index, high + 1, 'Xóa supply zone')
+
+                muoi_bay_phut_time_out_sell_zone := 0
+                supply_finding_sell_base := false
+
+                label.new(bar_index, high + 0.2, text = "Thoát setup do cross liquid, xóa supply zone cũ", force_overlay = true)
+
+                if array.size(arrayBoxSellBase) > 0
+                    lastBoxSellBaseBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+                    finding_entry_sell := false
+                    finding_entry_sell_time_out := 0
+                    finding_entry_sell_ten_minutes := 0
+                    array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+                    array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                    box.delete(lastBoxSellBaseBear)        
+                    strategy.close_all()        
+                    doi_sl_05R_sell := false     
+                    label.new(bar_index, high + 0.4, text = "Thoát setup do cross liquid, xóa sell base cũ", force_overlay = true)
+                if array.size(arrayBoxBuyBase) > 0 
+                    lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                    finding_entry_buy := false
+                    finding_entry_buy_ten_minutes := 0
+                    finding_entry_buy_time_out := 0
+                    demand_finding_buy_base := false
+                    liquid_finding_buy_base := false
+                    array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                    array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                    box.delete(lastBoxBuyBaseBull)
+                    label.new(bar_index, high + 0.4, text = "Thoát setup buy do cross liquid",color = color.red, force_overlay = true)
+                    strategy.close_all()
+                    doi_sl_05R := false
+                removePriceSupply := array.remove(arraySellLiquidity, i)
+                removeCandle_OpenPrice_Sell := open
+                removeLabel = array.remove(arrayLabelSell, i)
+                label.delete(removeLabel)
+                liquid_finding_sell_base := true
+                supply_finding_sell_base := false
+                do_sell_base_2_lan := 0
+                label.new(bar_index, high, "SellLiquidity has been crossed " + str.tostring(removePriceSupply), force_overlay = true)
+                alert("SellLiquidity has been crossed " + str.tostring(removePriceSupply), alert.freq_once_per_bar_close)
+                if array.size(arrayBoxSellBase) > 0 and (finding_entry_sell_ten_minutes > 0) 
+                    lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                    finding_entry_sell := false
+                    finding_entry_sell_ten_minutes := 0
+                    array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+                    array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                    box.delete(lastBoxSellBaseBear)
+                    strategy.close_all()
+                    doi_sl_05R_sell := false
+                if array.size(arraySupplyLv2) > 1
+                    if high > array.get(arraySupplyLv2, array.size(arraySupplyLv2) -1 )
+                        alert("SellLiquidity lv 3 has been crossed "+ str.tostring(high), alert.freq_once_per_bar)
+                        label.new(bar_index, high, text = "SellLiquidity lv 3 has been crossed "+ str.tostring(high), force_overlay = true)
+                        array.pop(arraySupplyLv2)
+                else if array.size(arraySupplyLv1) > 1
+                    if high > array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )
+                        alert("SellLiquidity lv 2 has been crossed "+ str.tostring(high), alert.freq_once_per_bar)
+                        label.new(bar_index, high, text = "SellLiquidity lv 2 has been crossed "+ str.tostring(high), force_overlay = true)
+                        array.pop(arraySupplyLv1)
+                // else
+                //     alert("SellLiquidity lv 1 has been crossed " + str.tostring(removePriceSupply), alert.freq_once_per_bar)
+                //     label.new(bar_index, high, text = "SellLiquidity lv 1 has been crossed", force_overlay = true)
+    
+    if  high > removePriceSupply + 5
+        label.new(bar_index, high + 0.5, 'Chạm cản SellLiquidity 5 giá :'+ str.tostring(removePriceSupply))
+        liquid_finding_sell_base := false
+        supply_finding_sell_base
+        removePriceSupply := 10000
+        finding_entry_sell := false 
+        finding_entry_sell_ten_minutes := 0
+        finding_entry_sell_time_out := 0
+        do_sell_base_2_lan := 0
+
+        if array.size(arrayBoxSellBase) > 0
+            lastBoxSellBaseBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+            array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+            array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+            box.delete(lastBoxSellBaseBear)
+            strategy.close_all()
+            doi_sl_05R_sell := false
+
+    // Case 2 giảm
+    if is_new_m15_candle_close and (open_nen_second < close_nen_second and open_nen_third > close_nen_third and close_nen_second - open_nen_second <= 0.5 * (open_nen_third - close_nen_third) and close_nen_third < low_nen_second and high_nen_second > high_nen_third and math.abs(high_nen_second - close_nen_second) > math.abs(open_nen_second - close_nen_second) and open_nen_second - low_nen_second < close_nen_second - open_nen_second and close_nen_third - low_nen_third <= 0.25 *(open_nen_third - close_nen_third) )
+        make_color_giam := true
+        boxBear := box.new(bar_index-14, high_nen_second, last_bar_index, high_nen_third, border_color = color.red, bgcolor = color.rgb(255,82,82,61), text = "Case 2 giảm", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        array.push(arrayBoxSup, boxBear)
+
+        giaNenGiam = high_nen_second
+        array.push(arrayGiaNenGiam, giaNenGiam)
+        // label.new(bar_index, low,str.tostring(giaNenGiam))
+        array.push(arrayBoxSup_cham, 0)
+        array.push(arrayBoxSup_status_touched, 0)
+
+    // Case 4 giảm
+    if is_new_m15_candle_close and open_nen_first < close_nen_first and open_nen_second > close_nen_second and open_nen_third > close_nen_third and high_nen_second - high_nen_third >1 and close_nen_third - low_nen_third < open_nen_third - close_nen_third and close_nen_third < open_nen_first and high_nen_first - close_nen_first < close_nen_first - open_nen_first
+        make_color_cho_rieng_case_4_giam := true
+        make_color_giam := true
+        boxBear := box.new(bar_index-14, high_nen_second, last_bar_index, high_nen_third, border_color = color.red, bgcolor = color.rgb(255,82,82,61), text = "Case 4 giảm", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        // array.push(arrayBoxSup, boxBear)
+        // giaNenGiam = high_nen_second
+        // array.push(arrayGiaNenGiam, giaNenGiam)
+
+        // array.push(arrayBoxSup_cham, 0)
+        // array.push(arrayBoxSup_status_touched, 0)
+        if array.size(arrayBoxSup) > 0
+            boxBear_before = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1)
+            if box.get_top(boxBear) > box.get_top(boxBear_before) and box.get_bottom(boxBear) < box.get_bottom(boxBear_before)
+                // Bo case cu truoc do
+                array.pop(arrayBoxSup)
+                box.delete(boxBear_before)
+                if array.size(arrayGiaNenGiam) > 0 
+                    array.pop(arrayGiaNenGiam)
+                array.pop(arrayBoxSup_cham)
+                array.pop(arrayBoxSup_status_touched)
+                // label.new(bar_index, high, '1')
+            //Them case 4 vo
+            array.push(arrayBoxSup, boxBear)
+            giaNenGiam = high_nen_second
+            array.push(arrayGiaNenGiam, giaNenGiam)
+            array.push(arrayBoxSup_cham, 0)
+            array.push(arrayBoxSup_status_touched, 0)
+
+        else 
+            array.push(arrayBoxSup, boxBear)
+            giaNenGiam = high_nen_second
+            array.push(arrayGiaNenGiam, giaNenGiam)
+            array.push(arrayBoxSup_cham, 0)
+            array.push(arrayBoxSup_status_touched, 0)
+
+    // Case 5 giam
+    if is_new_m15_candle_close and open_nen_second < close_nen_second and open_nen_third > close_nen_third and high_nen_third > high_nen_second and close_nen_third < low_nen_second and close_nen_third - low_nen_third >= 0.5 * (open_nen_third - close_nen_third) and high_nen_third - open_nen_third >= 0.5 * (open_nen_third - close_nen_third) and high_nen_third - high_nen_second > 0.5
+        make_color_giam := true
+        boxBear := box.new(bar_index-14, high_nen_third, last_bar_index, high_nen_second, border_color = color.red, bgcolor = color.rgb(255,82,82,61), text = "Case 5 giảm", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+        array.push(arrayBoxSup, boxBear)
+        giaNenGiam = high_nen_third
+
+        array.push(arrayGiaNenGiam, giaNenGiam)
+        array.push(arrayBoxSup_cham, 0)
+        array.push(arrayBoxSup_status_touched, 0)
+
+    // Line cho lv 1, 2, 3
+    if array.size(arrayGiaNenGiam) > 0
+        for i = array.size(arrayGiaNenGiam) - 1 to 0 by 1
+            giaNenGiam = array.get(arrayGiaNenGiam, i)
+            if giaNenGiam > 0
+                newline = line.new(bar_index -3, giaNenGiam, last_bar_index, giaNenGiam, color = color.black, style = line.style_dotted, width = 2, force_overlay = true)  
+                array.push(arrayGiaTriCuaLineGiam, newline)
+                array.remove(arrayGiaNenGiam, i)    
+    
+    if is_new_m15_candle_close and array.size(arrayGiaTriCuaLineGiam) > 0
+        for j = array.size(arrayGiaTriCuaLineGiam) - 1 to 0 by 1
+            old_line = array.get(arrayGiaTriCuaLineGiam, j)
+            if TF_2_SL == line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineGiam, j)    
+                newline = line.new(bar_index -7, TF_2_SL, last_bar_index, TF_2_SL, color = color.red, width = 2, force_overlay = true)
+                array.push(arrayGiaTriCuaLineGiam, newline)
+                arrayDemandLv2.push(TF_2_SL)
+                break
+            if TF_1_SL == line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineGiam, j)    
+                newline = line.new(bar_index -7, TF_1_SL, last_bar_index, TF_1_SL, color = color.green, width = 2, force_overlay = true)
+                array.push(arrayGiaTriCuaLineGiam, newline)
+                arraySupplyLv1.push(TF_1_SL)    
+                break
+            
+
+
+
+
+    // Box management
+    if array.size(arrayBoxSup) > 0
+        int i = array.size(arrayBoxSup) 
+        while i > 0
+            i -= 1
+            lastBoxBear = array.get(arrayBoxSup, i )
+            canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+            canhTrenLastBoxBear := box.get_top(lastBoxBear)
+            int so_lan = array.get(arrayBoxSup_cham, i)
+            int status_touched = array.get(arrayBoxSup_status_touched, i)
+            if ( (high < canhTrenLastBoxBear and high > canhDuoiLastBoxBear) or (close < canhTrenLastBoxBear and close > canhDuoiLastBoxBear) ) and not(make_color_giam)
+                if removePriceSupply != 10000
+                    removePriceSupply := 10000
+                if so_lan == 1 and status_touched == 0
+                    if array.size(arrayBoxBuyBase) > 0 
+                        lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                        finding_entry_buy := false
+                        finding_entry_buy_ten_minutes := 0
+                        finding_entry_buy_time_out := 0
+                        demand_finding_buy_base := false
+                        liquid_finding_buy_base := false
+                        array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                        array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                        box.delete(lastBoxBuyBaseBull)
+                        label.new(bar_index, high + 0.4, text = "Thoát setup buy do chạm supply",color = color.red, force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R := false
+                    if array.size(arrayBoxSellBase) > 0 // and status_touched == 0
+                        lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                        finding_entry_sell := false
+                        finding_entry_sell_ten_minutes := 0
+                        finding_entry_sell_time_out := 0
+
+                        array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+                        array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                        box.delete(lastBoxSellBaseBear)
+                        label.new(bar_index, low, "Xóa sell base cũ", force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R_sell := false
+                    removeCandle_OpenPrice_Sell := open[2]
+                    liquid_finding_sell_base := false
+                    supply_finding_sell_base := true
+                    demand_finding_buy_base := false
+                    liquid_finding_buy_base := false
+                    so_lan := so_lan + 1
+                    alert("Supply Box "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                    label.new(bar_index, high, "Supply zone "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", force_overlay = true)
+                    status_touched := 1
+                    finding_entry_sell_time_out := 0
+
+                    if array.size(arraySupplyLv1) > 0
+                        LineLv1 = array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )
+                        if canhTrenLastBoxBear == LineLv1
+                            alert("Supply Box Lv 2 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar)
+                            // label.new(bar_index, high, text = "Demand Box Lv 2 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            array.pop(arraySupplyLv1)
+                    if array.size(arraySupplyLv2) > 0                
+                        LineLv2 = array.get(arraySupplyLv2, array.size(arraySupplyLv2) -1 )
+                        if canhTrenLastBoxBear == LineLv2
+                            alert("Supply Box Lv 3 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                            // label.new(bar_index, high, text = "Demand Box Lv 3 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            array.pop(arraySupplyLv2)
+                    if array.size(arrayGiaTriCuaLineGiam) > 1
+                        for j = array.size(arrayGiaTriCuaLineGiam)-1 to 0 by 1
+                            old_line = array.get(arrayGiaTriCuaLineGiam, j)    
+                            if canhTrenLastBoxBear == line.get_y1(old_line)
+                                alert("Supply Box Lv1 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                                // label.new(bar_index, high, text = "Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    array.set(arrayBoxSup_status_touched, i, status_touched)
+                    array.set(arrayBoxSup_cham, i, so_lan)
+
+                    lastBoxBear_da_thung = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1  )
+                    canhDuoiLastBoxBear_da_thung = box.get_bottom(lastBoxBear_da_thung)
+                    canhTrenLastBoxBear_da_thung = box.get_top(lastBoxBear_da_thung)
+                    if ( high > canhDuoiLastBoxBear_da_thung  and i != array.size(arrayBoxSup) - 1 and high > canhDuoiLastBoxBear) // and high < canhTrenLastBoxBear_da_thung
+                        muoi_bay_phut_time_out_sell_zone := 0
+                        array.pop(arrayBoxSup)
+                        array.pop(arrayBoxSup_cham)
+                        array.pop(arrayBoxSup_status_touched)
+                        box.delete(lastBoxBear_da_thung)
+                        label.new(bar_index, high + 1, text = "Xóa supply zone thủng", force_overlay = true)              
+                        //label.new(bar_index+1, high + 1, "1")
+                    break
+                else if so_lan == 0 and not(make_color_giam)
+                    if array.size(arrayBoxBuyBase) > 0 
+                        lastBoxBuyBaseBull = array.get(arrayBoxBuyBase,  array.size(arrayBoxBuyBase) - 1 )
+                        finding_entry_buy := false
+                        finding_entry_buy_ten_minutes := 0
+                        finding_entry_buy_time_out := 0
+                        demand_finding_buy_base := false
+                        liquid_finding_buy_base := false
+                        array.remove(arrayBoxBuyBase, array.size(arrayBoxBuyBase) - 1 )
+                        array.remove(mang_so_lan_cham_buy_base, array.size(mang_so_lan_cham_buy_base) - 1)
+                        box.delete(lastBoxBuyBaseBull)
+                        label.new(bar_index, high + 0.4, text = "Thoát setup buy do chạm supply",color = color.red, force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R := false
+                    if array.size(arrayBoxSellBase) > 0 // and status_touched == 0
+                        lastBoxSellBaseBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+                        finding_entry_sell := false
+                        finding_entry_sell_ten_minutes := 0
+                        finding_entry_sell_time_out := 0
+
+                        array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+                        array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+                        box.delete(lastBoxSellBaseBear)
+                        label.new(bar_index, low, "Xóa sell base cũ", force_overlay = true)
+                        strategy.close_all()
+                        doi_sl_05R_sell := false
+                    removeCandle_OpenPrice_Sell := open[2]
+                    so_lan := so_lan + 1
+                    liquid_finding_sell_base := false
+                    supply_finding_sell_base := true
+                    demand_finding_buy_base := false
+                    liquid_finding_buy_base := false
+                    finding_entry_sell_time_out := 0
+
+                    alert("Supply Box "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    label.new(bar_index, high, "Supply zone "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", force_overlay = true)
+                    status_touched := 1
+
+                    if array.size(arraySupplyLv1) > 0
+                        LineLv1 = array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )
+                        if canhTrenLastBoxBear == LineLv1
+                            alert("Supply Box Lv 2 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar)
+                            // label.new(bar_index, high, text = "Demand Box Lv 2 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            // array.pop(arraySupplyLv1)
+                    if array.size(arraySupplyLv2) > 0                
+                        LineLv2 = array.get(arraySupplyLv2, array.size(arraySupplyLv2) -1 )
+                        if canhTrenLastBoxBear == LineLv2
+                            alert("Supply Box Lv 3 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                            // label.new(bar_index, high, text = "Demand Box Lv 3 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                            // array.pop(arraySupplyLv2)
+                    if array.size(arrayGiaTriCuaLineGiam) > 1
+                        for j = array.size(arrayGiaTriCuaLineGiam)-1 to 0 by 1
+                            old_line = array.get(arrayGiaTriCuaLineGiam, j)    
+                            if canhTrenLastBoxBear == line.get_y1(old_line)
+                                alert("Supply Box Lv1 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.", alert.freq_once_per_bar_close)
+                                // label.new(bar_index, high, text = "Demand Box Lv1 "+ str.tostring(canhTrenLastBoxBear)+" - "+ str.tostring(canhDuoiLastBoxBear) + " has been touched "+ str.tostring(so_lan)+" times.")
+                    array.set(arrayBoxSup_status_touched, i, status_touched)
+                    array.set(arrayBoxSup_cham, i, so_lan)
+                    lastBoxBear_da_thung = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1  )
+                    canhDuoiLastBoxBear_da_thung = box.get_bottom(lastBoxBear_da_thung)
+                    canhTrenLastBoxBear_da_thung = box.get_top(lastBoxBear_da_thung)
+                    if ( high > canhDuoiLastBoxBear_da_thung  and i != array.size(arrayBoxSup) - 1 and high > canhDuoiLastBoxBear) // and high < canhTrenLastBoxBear_da_thung
+                        muoi_bay_phut_time_out_sell_zone := 0
+                        array.pop(arrayBoxSup)
+                        array.pop(arrayBoxSup_cham)
+                        array.pop(arrayBoxSup_status_touched)
+                        box.delete(lastBoxBear_da_thung)
+                        // label.new(bar_index, high + 1, text = "Xóa supply zone thủng", force_overlay = true)              
+                    break
+
+
+    if array.size(arrayBoxSup) > 0
+        for i = array.size(arrayBoxSup) - 1 to 0 by 1
+            lastBoxBear = array.get(arrayBoxSup, i )
+            canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+            canhTrenLastBoxBear := box.get_top(lastBoxBear)
+            int so_lan = array.get(arrayBoxSup_cham, i)
+            int status_touched = array.get(arrayBoxSup_status_touched, i)
+
+            if is_new_m15_candle_close and (close_nen_third < canhDuoiLastBoxBear or high_nen_third < canhDuoiLastBoxBear) and open_nen_third > close_nen_third
+                if so_lan == 1 and ( status_touched == 1 or status_touched == -1 )
+                    array.set(arrayBoxSup_status_touched, i, 0)
+    // label.new(bar_index, high, str.tostring(muoi_bay_phut_time_out_sell_zone))
+    if high > removePrice_sell_zone and muoi_bay_phut_time_out_sell_zone == 0
+        // label.new(bar_index, high + 1, str.tostring(muoi_bay_phut_time_out_sell_zone) +" "+str.tostring(removePrice_sell_zone), color = color.red)
+        muoi_bay_phut_time_out_sell_zone += 1
+        removePrice_sell_zone := 100000
+    if muoi_bay_phut_time_out_sell_zone > 0 
+        muoi_bay_phut_time_out_sell_zone += 1
+        // label.new(bar_index, high, str.tostring(muoi_bay_phut_time_out_sell_zone))
+    if muoi_bay_phut_time_out_sell_zone > 19
+        supply_finding_sell_base := false
+        liquid_finding_sell_base := false
+        muoi_bay_phut_time_out_sell_zone := 0
+        if array.size(arrayBoxSup) > 0
+            for i =  array.size(arrayBoxSup) - 1  to 0 by 1
+                lastBoxBear = array.get(arrayBoxSup, i )
+                canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+                canhTrenLastBoxBear := box.get_top(lastBoxBear)
+                int so_lan = array.get(arrayBoxSup_cham, i)
+                int status_touched = array.get(arrayBoxSup_status_touched, i)
+                if high > canhTrenLastBoxBear
+                    array.remove(arrayBoxSup, i)
+                    box.delete(lastBoxBear)
+                    array.remove(arrayBoxSup_cham, i)
+                    array.remove(arrayBoxSup_status_touched, i)
+                    label.new(bar_index, high, text = "Thoát setup do hết 17 phút, xóa supply zone cũ", force_overlay = true)
+        
+    if array.size(arrayGiaNenGiam) > 0
+        for i = array.size(arrayGiaNenGiam) - 1 to 0 by 1
+            giaNenGiam = array.get(arrayGiaNenGiam, i)
+            if high > giaNenGiam
+                array.remove(arrayGiaNenGiam, i)
+    
+    if array.size(arrayGiaTriCuaLineGiam) > 0
+        for i = array.size(arrayGiaTriCuaLineGiam) - 1 to 0 by 1
+            old_line = array.get(arrayGiaTriCuaLineGiam, i)
+            if high > line.get_y1(old_line)
+                removeLine = line.get_y1(old_line)
+                line.delete(old_line)
+                array.remove(arrayGiaTriCuaLineGiam, i)
+
+                if array.size(arraySupplyLv1) > 1
+                    if high > array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )
+                        alert("Supply line lv 1 has been crossed "+ str.tostring(array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )),alert.freq_once_per_bar_close)
+                        label.new(bar_index, low, text = "Supply line lv 1 has been crossed "+ str.tostring(array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )), force_overlay = true)
+                        array.pop(arraySupplyLv1)
+                        liquid_finding_sell_base := true
+                        supply_finding_sell_base := false
+                        break
+                if array.size(arraySupplyLv2) > 1
+                    if high > array.get(arraySupplyLv2, array.size(arraySupplyLv1) -1 )
+                        alert("Supply line lv 2 has been crossed "+ str.tostring(array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )),alert.freq_once_per_bar_close)
+                        label.new(bar_index, low, text = "Supply line lv 2 has been crossed "+ str.tostring(array.get(arraySupplyLv1, array.size(arraySupplyLv1) -1 )), force_overlay = true)
+                        array.pop(arraySupplyLv1)
+                        liquid_finding_sell_base := true
+                        supply_finding_sell_base := false
+                        break
+                // liquid_finding_sell_base := true
+                // supply_finding_sell_base := false
+                // alert("Supply line lv 0 has been crossed "+str.tostring(removeLine),alert.freq_once_per_bar_close)
+                // label.new(bar_index, low, text = "Supply line lv 0 has been crossed "+ str.tostring(removeLine), force_overlay = true)
+
+      
+    /////// Sell Base //////////
+    var arrayLowGiaNenTang = array.new_float(0)
+    
+    // Nến tăng
+    if close[1] > open[1] and high[1] - close[1] < (close[1] - open[1]) + 0.1 and open - low < 0.33 *(close[1] - low[1]) or (open[1] > close[1] and close[1] - low[1] > open[1] - close[1] and high[1] - open[1] < open[1] - close[1] + 0.1 and open - low <= 0.33 *(open[1] - low[1]))
+        // make_color_tang := true
+        array.push(arrayLowGiaNenTang, low[1])
+        if array.size(arrayLowGiaNenTang) > 5
+            array.shift(arrayLowGiaNenTang)  
+
+    if liquid_finding_sell_base and array.size(arrayLowGiaNenTang) > 0
+        float x = 0
+        float y = 0
+        int k = 0   
+        // label.new(bar_index, high, "1")
+        if low < array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1) or keep_finding_liquid_sell == true
+           
+
+            if keep_finding_liquid_sell == false
+                index_of_low_nearest := 1
+
+                while low[index_of_low_nearest] != array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1)
+                    index_of_low_nearest += 1 
+                    if low[index_of_low_nearest] == array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1)
+                        break
+            hai_phut_hon_liquid_sell += 1
+            keep_finding_liquid_sell := true
+            if hai_phut_hon_liquid_sell > 2
+                low_nearest = array.remove(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) - 1)
+                hai_phut_hon_liquid_sell := 0
+                keep_finding_liquid_sell := false
+                while array.size(arrayLowGiaNenTang) > 0
+                    if low < array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) - 1) 
+                        array.pop(arrayLowGiaNenTang)
+                    else
+                        break
+                for j = 0 to 5 by 1
+                    if removeCandle_OpenPrice_Sell == open[j]
+                        break
+                    
+                    // if index_of_low_nearest + 2 < j+2
+                    //     break
+                    if liquid_finding_sell_base
+                        x := 0
+                        y := 0
+                        k := -1
+                        if (( open[j+1] > close[j+1] and  close[j+1] - low[j+1] < (open[j+1] - close[j+1]) + 0.1 and high[j] - open[j] < 0.33 *(high[j+1] - close[j+1]) or (close[j+1] > open[j+1] and high[j+1] - close[j+1] > close[j+1] - open[j+1] and open[j+1] - low[j+1] < (close[j+1] - open[j+1]) + 0.1 and high[j] - open[j] <= 0.33 *(high[j+1] - open[j+1]) ) ) and not(open[j+2] > close[j+2] and  close[j+2] - low[j+2] < (open[j+2] - close[j+2]) + 0.1 and high[j+1] - open[j+1] < 0.33 *(high[j+2] - close[j+2]) or (close[j+2] > open[j+2] and high[j+2] - close[j+2] > close[j+2] - open[j+2] and open[j+2] - low[j+2] < (close[j+2] - open[j+2]) + 0.1 and high[j+1] - open[j+1] <= 0.33 *(high[j+2] - open[j+2]) )) ) 
+                            if high[j+1] < high[j+2]
+                                x := high[j+2]
+                                k := j+2
+
+                            else 
+                                x := high[j+1]  
+                                k := j+2
+                            // label.new(bar_index, high+j, str.tostring(x)+" "+str.tostring(j))
+                            if x != 0 and k >= 2 
+                                if low[k] - high[k - 2] > 0.05 and open[k - 1] > close[k - 1]
+                                    y := high[k - 2]
+                    
+                            if x != 0 and k >= 3 
+                                if low[k - 1] - high[k - 3] > 0.05 and open[k - 2] > close[k - 2]
+                                    y := high[k - 3]
+                            
+                            if x != 0 and k >= 4 
+                                if y == high[k - 3] and  low[k - 2] - high[k - 4] > 0.05 and open[k - 3] > close[k - 3]
+                                    y := high[k - 4]
+                        
+                            if x != 0 and y != 0 
+                                boxBear := box.new(bar_index, x, last_bar_index, y, border_color = color.red, bgcolor = color.rgb(255,82,82,61), text = "Sell Base", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+                                array.push(arrayBoxSellBase, boxBear)
+                                liquid_finding_sell_base := false
+                                label.new(bar_index, high, "Sellbase "+ str.tostring(x)+"-"+str.tostring(y), force_overlay = true)
+                                alert("Sellbase "+ str.tostring(x)+"-"+str.tostring(y)+" has been created.", alert.freq_once_per_bar_close)
+                                finding_entry_sell_time_out := index_of_low_nearest + 2
+                                making_sell_base := true
+                                array.push(mang_so_lan_cham_sell_base, 0)
+                                do_sell_base_2_lan += 1
+    
+    
+    if supply_finding_sell_base == true and array.size(arrayLowGiaNenTang) > 0 
+        float x = 0
+        float y = 0
+        int k = 0  
+        if low < array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1) or keep_finding_supply == true
+            if keep_finding_supply == false
+                index_of_low_nearest := 1
+
+                while low[index_of_low_nearest] != array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1)
+                    index_of_low_nearest += 1 
+                    if low[index_of_low_nearest] == array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) -1)
+                        break
+            hai_phut_hon_supply += 1
+            keep_finding_supply := true
+
+            if hai_phut_hon_supply > 2
+
+                low_nearest = array.pop(arrayLowGiaNenTang)
+                keep_finding_supply := false
+                while array.size(arrayLowGiaNenTang) > 0 
+                    if low < array.get(arrayLowGiaNenTang, array.size(arrayLowGiaNenTang) - 1) 
+                        array.pop(arrayLowGiaNenTang)
+                    else 
+                        break
+                hai_phut_hon_supply := 0
+                // label.new(bar_index, high, str.tostring(low))
+                for j = 0 to 5 by 1
+                    // label.new(bar_index + j, high,str.tostring(       (( open[j+1] > close[j+1] and  close[j+1] - low[j+1] < (open[j+1] - close[j+1]) + 0.1 and high[j] - open[j] < 0.33 *(high[j+1] - close[j+1]) or (close[j+1] > open[j+1] and high[j+1] - close[j+1] > close[j+1] - open[j+1] and open[j+1] - low[j+1] < (close[j+1] - open[j+1]) + 0.1 and high[j] - open[j] <= 0.33 *(high[j+1] - open[j+1]) ) ) and not(open[j+2] > close[j+2] and  close[j+2] - low[j+2] < (open[j+2] - close[j+2]) + 0.1 and high[j+1] - open[j+1] < 0.33 *(high[j+2] - close[j+2]) or (close[j+2] > open[j+2] and high[j+2] - close[j+2] > close[j+2] - open[j+2] and open[j+2] - low[j+2] < (close[j+2] - open[j+2]) + 0.1 and high[j+1] - open[j+1] <= 0.33 *(high[j+2] - open[j+2]) )) )       ))
+                    // label.new(bar_index + j, low, str.tostring(removeCandle_OpenPrice_Sell))
+                    if removeCandle_OpenPrice_Sell == open[j]
+                        break
+                    if low[j] == low_nearest
+                        break
+                    // if index_of_low_nearest + 2 < j + 2
+                    //     break
+
+                    if supply_finding_sell_base == true
+
+                        x := 0
+                        y := 0
+                        k := -1
+                        if (( open[j+1] > close[j+1] and  close[j+1] - low[j+1] < (open[j+1] - close[j+1]) + 0.1 and high[j] - open[j] < 0.33 *(high[j+1] - close[j+1]) or (close[j+1] > open[j+1] and high[j+1] - close[j+1] > close[j+1] - open[j+1] and open[j+1] - low[j+1] < (close[j+1] - open[j+1]) + 0.1 and high[j] - open[j] <= 0.33 *(high[j+1] - open[j+1]) ) ) and not(open[j+2] > close[j+2] and  close[j+2] - low[j+2] < (open[j+2] - close[j+2]) + 0.1 and high[j+1] - open[j+1] < 0.33 *(high[j+2] - close[j+2]) or (close[j+2] > open[j+2] and high[j+2] - close[j+2] > close[j+2] - open[j+2] and open[j+2] - low[j+2] < (close[j+2] - open[j+2]) + 0.1 and high[j+1] - open[j+1] <= 0.33 *(high[j+2] - open[j+2]) )) ) 
+                            if high[j+1] < high[j+2]
+                                x := high[j+2]
+                                k := j+2
+
+                            else 
+                                x := high[j+1]  
+                                k := j+2
+                            if x != 0 and k >= 2 
+                                if low[k] - high[k - 2] > 0.05 and open[k - 1] > close[k - 1]
+                                    y := high[k - 2]
+                    
+                            if x != 0 and k >= 3 
+                                if low[k - 1] - high[k - 3] > 0.05 and open[k - 2] > close[k - 2]
+                                    y := high[k - 3]
+
+                            if x != 0 and k >= 4 
+                                if y == high[k - 3] and  low[k - 2] - high[k - 4] > 0.05 and open[k - 3] > close[k - 3]
+                                    y := high[k - 4]
+
+    
+                            if array.size(arrayBoxSup) > 0
+                                lastBoxBear = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1)
+                                canhDuoiLastBoxBear := box.get_bottom (lastBoxBear)
+
+                                if canhDuoiLastBoxBear - high > removeCanhDuoiSupply - high
+                                    canhDuoiLastBoxBear := removeCanhDuoiSupply
+                                // else
+                                //     if removePriceSupply != 0 
+                                //         canhDuoiLastBoxBear := removePriceSupply
+                                //     else
+                                //         canhDuoiLastBoxBear := 0
+                            if x != 0 and y != 0 and x > canhDuoiLastBoxBear - 0.5
+                                boxBear := box.new(bar_index, x, last_bar_index, y, border_color = color.red, bgcolor = color.rgb(255,82,82,61), text = "Sell Base", text_size = size.normal, text_color = color.red, extend = extend.none, force_overlay = true)
+                                array.push(arrayBoxSellBase, boxBear)
+                                supply_finding_sell_base := false
+                                label.new(bar_index, high, "Sellbase "+ str.tostring(x)+"-"+str.tostring(y), force_overlay = true)
+                                alert("Sellbase "+ str.tostring(x)+"-"+str.tostring(y)+" has been created.", alert.freq_once_per_bar_close)
+                                finding_entry_sell_time_out := index_of_low_nearest + 2
+                                making_sell_base := true
+                                array.push(mang_so_lan_cham_sell_base, 0)
+                                do_sell_base_2_lan += 1
+
+    if finding_entry_sell_time_out > 0
+        finding_entry_sell_time_out += 1
+    
+    if finding_entry_sell_time_out > 60 and array.size(arrayBoxSellBase) > 0 and finding_entry_sell == true
+        // lastBoxBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+        // canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        for i = array.size(arrayBoxSellBase)-1 to 0 by 1
+            lastBoxBear = array.get(arrayBoxSellBase, i)
+            array.remove(arrayBoxSellBase, i )
+            array.remove(mang_so_lan_cham_sell_base, i)
+            box.delete(lastBoxBear)   
+            strategy.close_all()
+            doi_sl_05R_sell := false
+        // array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+        // array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+        // box.delete(lastBoxBear)   
+        finding_entry_sell_time_out := 0
+        finding_entry_sell := false  
+        liquid_finding_sell_base := false
+        supply_finding_sell_base := false       
+        label.new(bar_index, high, text = "Thoát setup do hết 60 phút, xóa sell base cũ.", force_overlay = true)
+    if finding_entry_sell_time_out > 80 and finding_entry_sell == false
+        if array.size(arrayBoxSellBase) > 0
+            lastBoxBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+            canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+            array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+            array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+            box.delete(lastBoxBear) 
+            strategy.close_all() 
+            doi_sl_05R_sell := false
+            finding_entry_sell_time_out := 0
+            finding_entry_sell := false 
+            liquid_finding_sell_base := false
+            supply_finding_sell_base := false       
+            label.new(bar_index, high, text = "Thoát setup do hết 80 phút, xóa sell base cũ.", force_overlay = true)
+    if array.size(arrayBoxSellBase) > 0
+        lastBoxBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+        canhTrenLastBoxBearBase = box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        so_lan_cham_base = array.get(mang_so_lan_cham_sell_base,  array.size(mang_so_lan_cham_sell_base) - 1)
+        if high > canhDuoiLastBoxBear and high < canhTrenLastBoxBearBase and finding_entry_sell == false and so_lan_cham_base == 0
+            so_lan_cham_base += 1
+            array.set(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1, so_lan_cham_base) 
+            finding_entry_sell := true
+            label.new(bar_index, high, text ="Sell base cham lan thu "+ str.tostring(so_lan_cham_base), force_overlay = true)
+            alert("Sell base cham lan thu "+ str.tostring(so_lan_cham_base), alert.freq_once_per_bar_close)
+    if array.size(arrayBoxSellBase) > 0
+        lastBoxBear = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+        canhTrenLastBoxBearBase = box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        if high > canhTrenLastBoxBearBase + 0.5 and finding_entry_sell_ten_minutes == 0
+            finding_entry_sell_ten_minutes += 1
+            finding_entry_sell := true
+            label.new(bar_index, high, text = "Bắt đầu đếm 10 phút.", force_overlay = true)
+
+    if finding_entry_sell == true and array.size(arrayBoxSellBase) > 0 and is_within_timerange
+        // finding_entry_time_out += 1
+        lastBoxBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+        canhTrenLastBoxBearBase = box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        if finding_entry_sell_ten_minutes > 0
+            if (open > close) and math.max(high, high[1], high[3] ) > canhDuoiLastBoxBear 
+                if open[2] < close[2] 
+                    if ( close <= open[2] ) and close - low < open - close and ADX < 30 and finding_entry_sell_time_out <= 60
+                        float buyLiquidity_entry = 0
+                        float canhTrenLastBoxBaseBull_entry = 0
+                        if array.size(arrayBoxDem) > 0
+                            lastBoxBuyBaseBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1 )
+                            canhTrenLastBoxBaseBull_entry := lastBoxBuyBaseBull.get_top()
+                        if array.size(arrayBuyLiquidity) > 0
+                            buyLiquidity_entry := array.get(arrayBuyLiquidity, array.size(arrayBuyLiquidity) - 1)
+                        closest_tp_sell = math.max(canhTrenLastBoxBaseBull_entry, buyLiquidity_entry)
+                        if close - (sl_sell + 0.5 - close) > closest_tp_sell
+                            closest_tp_sell := close - 2 * (sl_sell + 0.5 - close) > closest_tp_sell ? close - 2 * (sl_sell + 0.5 - close) : closest_tp_sell
+                            alert("Enrty sell has been created :"+ str.tostring(close) , alert.freq_once_per_bar_close)
+                            finding_entry_sell := false
+                            tp_line_sell := line.new(bar_index - 10, closest_tp_sell, bar_index + 50, closest_tp_sell, color = color.black, force_overlay = true)
+                            sl_line_sell := line.new(bar_index - 10, sl_sell + 0.5, bar_index + 50, sl_sell + 0.5, color = color.purple, force_overlay = true)
+                            tp_text_sell := label.new(bar_index + 5, closest_tp_sell, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true)
+                            sl_text_sell := label.new(bar_index + 5, sl_sell + 0.5, text = "SL", textcolor = color.purple, style = label.style_none, force_overlay = true)
+                            entry_price := close
+                            takeProfitPrice = closest_tp_sell
+                            stopLossPrice = sl_sell +0.5
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Short", strategy.short, qty = lot_size)
+                            strategy.exit("Exit Short", from_entry="Short", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.1, text = "Entry sell has been created :"+ str.tostring(close) +" TP: "+ str.tostring(closest_tp_sell) +" Sl: "+str.tostring(sl_sell + 0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R_sell := true
+
+                if open[1] < close[1] and open[2] > close[2]
+                    if ( close <= close[2] ) and close - low < open - close and ADX < 30 and finding_entry_sell_time_out <= 60
+                        float buyLiquidity_entry = 0
+                        float canhTrenLastBoxBaseBull_entry = 0
+                        if array.size(arrayBoxDem) > 0
+                            lastBoxBuyBaseBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1 )
+                            canhTrenLastBoxBaseBull_entry := lastBoxBuyBaseBull.get_top()
+                        if array.size(arrayBuyLiquidity) > 0
+                            buyLiquidity_entry := array.get(arrayBuyLiquidity, array.size(arrayBuyLiquidity) - 1)
+                        closest_tp_sell = math.max(canhTrenLastBoxBaseBull_entry, buyLiquidity_entry)
+                        if close - (sl_sell + 0.5 - close) > closest_tp_sell
+                            closest_tp_sell := close - 2 * (sl_sell + 0.5 - close) > closest_tp_sell ? close - 2 * (sl_sell + 0.5 - close) : closest_tp_sell
+                            alert("Enrty sell has been created :"+ str.tostring(close) , alert.freq_once_per_bar_close)
+                            finding_entry_sell := false
+                            tp_line_sell := line.new(bar_index - 10, closest_tp_sell, bar_index + 50, closest_tp_sell, color = color.black, force_overlay = true)
+                            sl_line_sell := line.new(bar_index - 10, sl_sell + 0.5, bar_index + 50, sl_sell + 0.5, color = color.purple, force_overlay = true)
+                            tp_text_sell := label.new(bar_index + 5, closest_tp_sell, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true)
+                            sl_text_sell := label.new(bar_index + 5, sl_sell + 0.5, text = "SL", textcolor = color.purple, style = label.style_none, force_overlay = true) 
+                            entry_price := close
+                            takeProfitPrice = closest_tp_sell
+                            stopLossPrice = sl_sell + 0.5
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Short", strategy.short, qty = lot_size)
+                            strategy.exit("Exit Short", from_entry="Short", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.1, text = "Entry sell has been created :"+ str.tostring(close) +" TP: "+ str.tostring(closest_tp_sell) +" Sl: "+str.tostring(sl_sell + 0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R_sell := true
+
+        else
+            if (open > close) and math.max(high, high[1], high[3] ) > canhDuoiLastBoxBear 
+                if open[2] < close[2] 
+                    if ( close <= open[2] ) and close - low < open - close and ADX < 30 and finding_entry_sell_time_out <= 60
+                        float buyLiquidity_entry = 0
+                        float canhTrenLastBoxBaseBull_entry = 0
+                        if array.size(arrayBoxDem) > 0
+                            lastBoxBuyBaseBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1 )
+                            canhTrenLastBoxBaseBull_entry := lastBoxBuyBaseBull.get_top()
+                        if array.size(arrayBuyLiquidity) > 0
+                            buyLiquidity_entry := array.get(arrayBuyLiquidity, array.size(arrayBuyLiquidity) - 1)
+                        closest_tp_sell = math.max(canhTrenLastBoxBaseBull_entry, buyLiquidity_entry)
+                        if close - (canhTrenLastBoxBearBase + 0.5  - close) > closest_tp_sell
+                            closest_tp_sell := close - 2 * (canhTrenLastBoxBearBase + 0.5 - close) > closest_tp_sell ? close - 2 * (canhTrenLastBoxBearBase + 0.5 - close) : closest_tp_sell
+                            alert("Enrty sell has been created :"+ str.tostring(close) , alert.freq_once_per_bar_close)
+                            finding_entry_sell := false
+                            tp_line_sell := line.new(bar_index - 10, closest_tp_sell, bar_index + 50, closest_tp_sell, color = color.black, force_overlay = true)
+                            sl_line_sell := line.new(bar_index - 10, canhTrenLastBoxBearBase + 0.5, bar_index + 50, canhTrenLastBoxBearBase + 0.5, color = color.purple, force_overlay = true)
+                            tp_text_sell := label.new(bar_index + 5, closest_tp_sell, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true)
+                            sl_text_sell := label.new(bar_index + 5, canhTrenLastBoxBearBase + 0.5, text = "SL", textcolor = color.purple, style = label.style_none, force_overlay = true)
+                            entry_price := close
+                            takeProfitPrice = closest_tp_sell
+                            stopLossPrice = canhTrenLastBoxBearBase + 0.5 
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            // Điều kiện vào lệnh Buy
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Short", strategy.short, qty = lot_size)
+                            strategy.exit("Exit Short", from_entry="Short", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.1, text = "Enrty sell has been created :"+ str.tostring(close) +" TP: "+ str.tostring(closest_tp_sell) +" Sl: "+str.tostring(canhTrenLastBoxBearBase  + 0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R_sell := true
+
+                if open[1] < close[1] and open[2] > close[2]
+                    if ( close <= close[2] ) and close - low < open - close and ADX < 30 and finding_entry_sell_time_out <= 60
+                        float buyLiquidity_entry = 0
+                        float canhTrenLastBoxBaseBull_entry = 0
+                        if array.size(arrayBoxDem) > 0
+                            lastBoxBuyBaseBull = array.get(arrayBoxDem, array.size(arrayBoxDem) - 1 )
+                            canhTrenLastBoxBaseBull_entry := lastBoxBuyBaseBull.get_top()
+                        if array.size(arrayBuyLiquidity) > 0
+                            buyLiquidity_entry := array.get(arrayBuyLiquidity, array.size(arrayBuyLiquidity) - 1)
+                        closest_tp_sell = math.max(canhTrenLastBoxBaseBull_entry, buyLiquidity_entry)
+                        if close - (canhTrenLastBoxBearBase + 0.5 - close) > closest_tp_sell
+                            closest_tp_sell := close - 2 * (canhTrenLastBoxBearBase + 0.5 - close) > closest_tp_sell ? close - 2 * (canhTrenLastBoxBearBase +0.5 - close) : closest_tp_sell
+                            alert("Entry sell has been created :"+ str.tostring(close) , alert.freq_once_per_bar_close)
+                            finding_entry_sell := false
+                            tp_line_sell := line.new(bar_index - 10, closest_tp_sell, bar_index + 50, closest_tp_sell, color = color.black, force_overlay = true)
+                            sl_line_sell := line.new(bar_index - 10, canhTrenLastBoxBearBase + 0.5, bar_index + 50, canhTrenLastBoxBearBase + 0.5, color = color.purple, force_overlay = true)
+                            tp_text_sell := label.new(bar_index + 5, closest_tp_sell, text = "TP", textcolor = color.black, style = label.style_none, force_overlay = true)
+                            sl_text_sell := label.new(bar_index + 5, canhTrenLastBoxBearBase + 0.5, text = "SL", textcolor = color.purple, style = label.style_none, force_overlay = true) 
+                            entry_price := close
+                            takeProfitPrice = closest_tp_sell
+                            stopLossPrice = canhTrenLastBoxBearBase + 0.5 
+                            // Tham số rủi ro
+                            risk_per_trade = 1 // Rủi ro 1% vốn
+                            capital = strategy.equity // Vốn hiện tại
+                            risk_amount = (risk_per_trade / 100000) * capital // Tiền rủi ro
+
+                            // Giá trị pip trên XAUUSD (forexcom)
+                            pip_value = 0.1  // Giá trị pip của 1 lot (Forex.com XAUUSD: 0.1 USD/pip)
+
+                            sl_distance = math.abs(entry_price - stopLossPrice)  // Khoảng cách Entry tới SL (USD)
+
+                            // Tính khối lượng lệnh
+                            lot_size = risk_amount / (sl_distance * pip_value)
+                            strategy.entry("Short", strategy.short, qty = lot_size)
+                            strategy.exit("Exit Short", from_entry="Short", limit=takeProfitPrice, stop=stopLossPrice)
+                            label.new(bar_index, high + 0.1, text = "Entry sell has been created :"+ str.tostring(close) +" TP: "+ str.tostring(closest_tp_sell) +" Sl: "+str.tostring(canhTrenLastBoxBearBase  + 0.5) +" Qty: "+ str.tostring(lot_size), force_overlay = true)
+                            doi_sl_05R_sell := true
+
+
+    if not(na(tp_line_sell))
+        sl = line.get_y1(sl_line_sell)
+        if array.size(arrayBoxDem) > 0
+            lastBoxBull = array.get(arrayBoxDem,  array.size(arrayBoxDem) - 1 )
+            canhTrenLastBoxBull := box.get_top(lastBoxBull)
+            canhDuoiLastBoxBullBase = box.get_bottom(lastBoxBull)
+            if math.abs( canhTrenLastBoxBull - entry_price ) < math.abs( entry_price - sl ) 
+                strategy.close_all()
+                doi_sl_05R_sell := false
+                line.delete(tp_line_sell)
+                line.delete(sl_line_sell)
+                label.delete(tp_text_sell)
+                label.delete(sl_text_sell)
+                label.new(bar_index, high + 1, "Đóng lệnh sell.",color = color.red)
+        if array.size(arrayGiaTriCuaLineTang) > 0
+            lineTang = array.get(arrayGiaTriCuaLineTang, array.size(arrayGiaTriCuaLineTang) - 1 )
+            lineTang_price = line.get_y1(lineTang)
+            if math.abs( lineTang_price - entry_price ) < math.abs( entry_price - sl ) 
+                strategy.close_all()
+                line.delete(tp_line_sell)
+                line.delete(sl_line_sell)
+                label.delete(tp_text_sell)
+                label.delete(sl_text_sell)
+                label.new(bar_index, high + 1, "Đóng lệnh sell.",color = color.red)    
+                doi_sl_05R_sell := false
+
+        if low < entry_price - (sl - entry_price) * 1.5 and doi_sl_05R_sell
+            strategy.exit("Exit Short", from_entry="Short", limit=line.get_y1(tp_line_sell), stop=entry_price - (sl - entry_price) * 0.5)
+            line.set_y1(sl_line_sell,  entry_price - (sl - entry_price) * 0.5)
+            line.set_y2(sl_line_sell,  entry_price - (sl - entry_price) * 0.5)
+            label.set_y(sl_text_sell,  entry_price - (sl - entry_price) * 0.5)
+            doi_sl_05R_sell := false
+        if low < line.get_y1(tp_line_sell) and open > close
+            line.delete(tp_line_sell)
+            line.delete(sl_line_sell)
+            label.delete(tp_text_sell)
+            label.delete(sl_text_sell)
+                
+        if high > line.get_y1(sl_line_sell) and open < close  
+            line.delete(tp_line_sell)
+            line.delete(sl_line_sell)
+            label.delete(tp_text_sell)
+            label.delete(sl_text_sell)   
+
+ 
+    if finding_entry_sell_ten_minutes > 10 and array.size(arrayBoxSellBase) > 0
+        lastBoxBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+        canhTrenLastBoxBearBase = box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        // label.new(bar_index, high, str.tostring(finding_entry_sell_time_out))
+
+        if high > canhTrenLastBoxBearBase + 0.5 or na(tp_line_sell)// or finding_entry_sell == true
+            finding_entry_sell := false
+            finding_entry_sell_time_out := 0
+            finding_entry_sell_ten_minutes := 0
+            array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+            array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+            box.delete(lastBoxBear)  
+            strategy.close_all()
+            doi_sl_05R_sell := false  
+            label.new(bar_index, high, text = "Hết 10 phút, xóa sell base cũ", force_overlay = true)
+            if do_sell_base_2_lan == 1
+                label.new(bar_index + 1, high + 0.5, text = "Bắt đầu dò sell base mới", force_overlay = true)
+                do_sell_base_2_lan += 1  
+                liquid_finding_sell_base := true
+                supply_finding_sell_base := false 
+        else 
+            label.new(bar_index, high, text = "10 phút an toàn, set up sell base được tiếp tục", force_overlay = true)
+            finding_entry_sell_ten_minutes := 0
+            finding_entry_sell := false 
+    else if finding_entry_sell_ten_minutes > 0 
+        finding_entry_sell_ten_minutes += 1
+    
+    if array.size(arrayBoxSellBase) > 0        
+        lastBoxBear = array.get(arrayBoxSellBase,  array.size(arrayBoxSellBase) - 1 )
+        canhTrenLastBoxBearBase = box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        // label.new(bar_index, high, str.tostring(finding_entry_sell_time_out))
+
+        if high >= canhTrenLastBoxBearBase + (canhTrenLastBoxBearBase - canhDuoiLastBoxBear)
+            finding_entry_sell := false
+            finding_entry_sell_time_out := 0
+            finding_entry_sell_ten_minutes := 0
+            array.remove(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1 )
+            array.remove(mang_so_lan_cham_sell_base, array.size(mang_so_lan_cham_sell_base) - 1)
+            box.delete(lastBoxBear)
+            strategy.close_all()
+            doi_sl_05R_sell := false
+            label.new(bar_index, high, text = "Chạm cản sell base, xóa sell base cũ", force_overlay = true)  
+
+            if do_sell_base_2_lan == 1
+                do_sell_base_2_lan += 1  
+                liquid_finding_sell_base := true  
+                label.new(bar_index + 1, high + 0.5, text = "Bắt đầu dò sell base mới", force_overlay = true)
+
+    if array.size(arrayBoxSup) > 0
+        if high > canhTrenLastBoxBear and finding_entry_sell_ten_minutes == 0  and muoi_bay_phut_time_out_sell_zone == 0
+            muoi_bay_phut_time_out_sell_zone += 1
+            label.new(bar_index, high + 2, "Bắt đầu đếm 17 phút", color = color.red)
+        lastBoxBear = array.get(arrayBoxSup, array.size(arrayBoxSup) - 1 )
+        canhTrenLastBoxBear := box.get_top(lastBoxBear)
+        canhDuoiLastBoxBear := box.get_bottom(lastBoxBear)
+        int so_lan_cham_supply = array.get(arrayBoxSup_cham, array.size(arrayBoxSup_cham) - 1 )
+        if high > canhTrenLastBoxBear and  muoi_bay_phut_time_out_sell_zone == 0 // finding_entry_sell_ten_minutes == 0  and
+            muoi_bay_phut_time_out_sell_zone += 1
+            label.new(bar_index, high + 2, "Bắt đầu đếm 17 phút", color = color.red)
+
+        if so_lan_cham_supply > 1
+            removeCanhDuoiSupply := canhDuoiLastBoxBear
+            array.remove(arrayBoxSup,  array.size(arrayBoxSup) - 1 )
+            box.delete(lastBoxBear)
+            array.remove(arrayBoxSup_cham,  array.size(arrayBoxSup_cham) - 1 )
+            muoi_bay_phut_time_out_sell_zone := 0
+            removePrice_sell_zone := canhTrenLastBoxBear
+            // label.new(bar_index, high, str.tostring(removePrice_sell_zone))
+        if muoi_bay_phut_time_out_sell_zone > 3 and array.size(arrayBoxSellBase) > 0
+            sellbase = array.get(arrayBoxSellBase, array.size(arrayBoxSellBase) - 1)
+            array.remove(arrayBoxSup,  array.size(arrayBoxSup) - 1 )
+            box.delete(lastBoxBear)
+            array.remove(arrayBoxSup_cham,  array.size(arrayBoxSup_cham) - 1 )
+            array.remove(arrayBoxSup_status_touched,  array.size(arrayBoxSup_status_touched) - 1 )            
+            muoi_bay_phut_time_out_sell_zone := 0
+            label.new(bar_index, high + 1, str.tostring(1))
+
+    making_sell_base := false
+
+
+    // label.new(bar_index, high, str.tostring(liquid_finding_sell_base)+" "+str.tostring(supply_finding_sell_base), force_overlay = true)
+// barcolor(make_color_giam ? color.red : na, offset = -1)
+make_color_giam := false
