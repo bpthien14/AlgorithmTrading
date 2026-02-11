@@ -1,0 +1,31 @@
+============================================================
+=== BACKTEST STATISTICS ===
+============================================================
+
+[OVERVIEW]
+  Initial Capital:          1,000 USD
+  Final Equity:             5,774 USD
+  Total P/L:                +4,774 USD (+477.43%)
+
+[TRADES]
+  Total Trades:             302
+  - Winning Trades:         143
+  - Losing Trades:          158
+  - Breakeven Trades:       1
+  Win Rate:                 47.35%
+
+[PROFIT/LOSS]
+  Total Profit:             +15,276 USD
+  Total Loss:               -10,502 USD
+  Profit Factor:            1.45
+  Average Trade:            +16 USD
+  - Avg Winning Trade:      +107 USD
+  - Avg Losing Trade:       -66 USD
+
+[RISK METRICS]
+  Max Drawdown:             998 USD (30.21%)
+  Peak Equity:              5,774 USD
+  Largest Win:              +371 USD
+  Largest Loss:             -232 USD
+
+============================================================

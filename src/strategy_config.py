@@ -15,7 +15,7 @@ class StrategyConfig:
 
     # Trailing SL (dời SL về 0.5R khi đạt 1.5R)
     trailing_sl_trigger: float = 1.5    # Khi lãi đạt bao nhiêu R thì kích hoạt trailing
-    trailing_sl_level: float = 0.5      # Dời SL về mức bao nhiêu R
+    trailing_sl_level: float = 1.0      # Dời SL về mức bao nhiêu R
 
     # ADX filter
     adx_max_entry: float = 30.0         # Điều kiện ADX < adx_max_entry
