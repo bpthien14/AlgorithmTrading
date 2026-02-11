@@ -807,6 +807,22 @@ class PineScriptStrategy:
                 # Điều kiện touch (line 582)
                 if ((l < canhTrenLastBoxBull and l > canhDuoiLastBoxBull) or (c < canhTrenLastBoxBull)):
                     if so_lan == 1 and status_touched == 0:
+                        # ⭐ Xoá SELL BASE + Đóng SHORT (Pine line 672-682)
+                        if len(self.short_state.arrayBoxSellBase) > 0:
+                            self.short_state.arrayBoxSellBase.clear()
+                            self.short_state.mang_so_lan_cham_sell_base.clear()
+                            self.short_state.finding_entry_sell = False
+                            self.short_state.finding_entry_sell_ten_minutes = 0
+                            self.short_state.finding_entry_sell_time_out = 0
+                            
+                            # Đóng lệnh SHORT nếu có
+                            if self.short_state.in_position:
+                                ts = self.m1.index[idx]
+                                self._force_exit_short(idx, ts, "Demand zone touched")
+                            
+                            ts = self.m1.index[idx]
+                            print(f"[{ts}] ⚠️  CANCEL SELL FLOW (Demand zone touched)")
+                        
                         # Xoá Buy Base cũ nếu có (line 603-613)
                         if len(self.long_state.arrayBoxBuyBase) > 0:
                             self.long_state.arrayBoxBuyBase.pop()
@@ -830,6 +846,20 @@ class PineScriptStrategy:
                     elif so_lan == 0 and not self.long_state.make_color_tang:
                         # Touch LẦN ĐẦU (line 660-713)
                         ts = self.m1.index[idx]
+                        
+                        # ⭐ Xoá SELL BASE + Đóng SHORT (Pine line 672-682)
+                        if len(self.short_state.arrayBoxSellBase) > 0:
+                            self.short_state.arrayBoxSellBase.clear()
+                            self.short_state.mang_so_lan_cham_sell_base.clear()
+                            self.short_state.finding_entry_sell = False
+                            self.short_state.finding_entry_sell_ten_minutes = 0
+                            self.short_state.finding_entry_sell_time_out = 0
+                            
+                            # Đóng lệnh SHORT nếu có
+                            if self.short_state.in_position:
+                                self._force_exit_short(idx, ts, "Demand zone touched (1st)")
+                            
+                            print(f"[{ts}] ⚠️  CANCEL SELL FLOW (Demand zone touched 1st)")
                         
                         # Xoá Buy Base cũ nếu có (line 661-670)
                         if len(self.long_state.arrayBoxBuyBase) > 0:
@@ -863,6 +893,20 @@ class PineScriptStrategy:
             BuyLiquidity = self.long_state.arrayBuyLiquidity[i]
             
             if l < BuyLiquidity:
+                # ⭐ Xoá SELL BASE + Đóng SHORT khi cross Buy Liquidity (Pine line 413-423)
+                if len(self.short_state.arrayBoxSellBase) > 0:
+                    self.short_state.arrayBoxSellBase.clear()
+                    self.short_state.mang_so_lan_cham_sell_base.clear()
+                    self.short_state.finding_entry_sell = False
+                    self.short_state.finding_entry_sell_ten_minutes = 0
+                    self.short_state.finding_entry_sell_time_out = 0
+                    
+                    # Đóng lệnh SHORT nếu có
+                    if self.short_state.in_position:
+                        self._force_exit_short(idx, ts, "Buy Liquidity crossed")
+                    
+                    print(f"[{ts}] ⚠️  CANCEL SELL FLOW (Buy Liquidity crossed)")
+                
                 # Xoá Demand Zone nếu cần (line 386-399)
                 if len(self.long_state.arrayBoxDem) > 0:
                     lastBoxBull = self.long_state.arrayBoxDem[-1]
@@ -1448,6 +1492,10 @@ class PineScriptStrategy:
         Thực hiện entry Long với SL = base_bottom - 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 1121-1123).
         """
+        # ⭐ CHECK CONFLICT: Nếu đang có SHORT → Đóng SHORT trước
+        if self.short_state.in_position:
+            self._force_exit_short(idx, ts, "Conflict: Opening LONG")
+        
         sellLiquidity_entry = 200000.0
         canhDuoiLastBoxSell_entry = 200000.0
         
@@ -1502,6 +1550,10 @@ class PineScriptStrategy:
         Thực hiện entry Long với SL = sl_buy - 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 1207-1209).
         """
+        # ⭐ CHECK CONFLICT: Nếu đang có SHORT → Đóng SHORT trước
+        if self.short_state.in_position:
+            self._force_exit_short(idx, ts, "Conflict: Opening LONG (with sl_buy)")
+        
         sellLiquidity_entry = 200000.0
         canhDuoiLastBoxBear_entry = 200000.0
         
@@ -1549,6 +1601,84 @@ class PineScriptStrategy:
         self.long_state.entry_time = ts
         self.long_state.finding_entry_buy = False
         self.long_state.doi_sl_05R = True
+    
+    def _force_exit_long(self, idx: int, ts: pd.Timestamp, reason: str):
+        """
+        Force exit LONG position (không phải TP/SL).
+        Dùng khi có conflict hoặc zone đối lập xuất hiện.
+        """
+        if not self.long_state.in_position:
+            return
+        
+        exit_price = self.m1.iloc[idx]['close']
+        pnl = (exit_price - self.long_state.entry_price) * self.long_state.lot_size * 0.1
+        
+        # Update equity
+        self.current_equity += pnl
+        
+        # Record trade
+        trade = Trade(
+            entry_time=self.long_state.entry_time,
+            exit_time=ts,
+            direction=TradeDirection.BUY,
+            entry_price=self.long_state.entry_price,
+            exit_price=exit_price,
+            stop_loss=self.long_state.stop_loss,
+            take_profit=self.long_state.take_profit,
+            lot_size=self.long_state.lot_size,
+            pnl=pnl
+        )
+        self.trades.append(trade)
+        self.equity_curve.append(self.current_equity)
+        
+        # Update peak
+        if self.current_equity > self.peak_equity:
+            self.peak_equity = self.current_equity
+        
+        # Reset state
+        self.long_state.in_position = False
+        self.long_state.doi_sl_05R = False
+        
+        print(f"[{ts}] FORCE EXIT LONG @ {exit_price:.2f} | {reason} | PnL={pnl:+.2f}")
+    
+    def _force_exit_short(self, idx: int, ts: pd.Timestamp, reason: str):
+        """
+        Force exit SHORT position (không phải TP/SL).
+        Dùng khi có conflict hoặc zone đối lập xuất hiện.
+        """
+        if not self.short_state.in_position:
+            return
+        
+        exit_price = self.m1.iloc[idx]['close']
+        pnl = (self.short_state.entry_price - exit_price) * self.short_state.lot_size * 0.1
+        
+        # Update equity
+        self.current_equity += pnl
+        
+        # Record trade
+        trade = Trade(
+            entry_time=self.short_state.entry_time,
+            exit_time=ts,
+            direction=TradeDirection.SELL,
+            entry_price=self.short_state.entry_price,
+            exit_price=exit_price,
+            stop_loss=self.short_state.stop_loss,
+            take_profit=self.short_state.take_profit,
+            lot_size=self.short_state.lot_size,
+            pnl=pnl
+        )
+        self.trades.append(trade)
+        self.equity_curve.append(self.current_equity)
+        
+        # Update peak
+        if self.current_equity > self.peak_equity:
+            self.peak_equity = self.current_equity
+        
+        # Reset state
+        self.short_state.in_position = False
+        self.short_state.doi_sl_05R_sell = False
+        
+        print(f"[{ts}] FORCE EXIT SHORT @ {exit_price:.2f} | {reason} | PnL={pnl:+.2f}")
     
     def _manage_position(self, idx: int, ts: pd.Timestamp, o: float, h: float, l: float, c: float):
         """
@@ -1727,15 +1857,21 @@ class PineScriptStrategy:
                     
                     if so_lan == 1 and status_touched == 0:
                         # Touch LẦN 2 (line 1632)
-                        # Xoá Buy Base nếu có
+                        # ⭐ Xoá BUY BASE + Đóng LONG
                         if len(self.long_state.arrayBoxBuyBase) > 0:
-                            self.long_state.arrayBoxBuyBase.pop()
-                            self.long_state.mang_so_lan_cham_buy_base.pop()
+                            self.long_state.arrayBoxBuyBase.clear()
+                            self.long_state.mang_so_lan_cham_buy_base.clear()
                             self.long_state.finding_entry_buy = False
                             self.long_state.finding_entry_buy_ten_minutes = 0
                             self.long_state.finding_entry_buy_time_out = 0
                             self.long_state.demand_finding_buy_base = False
                             self.long_state.liquid_finding_buy_base = False
+                            
+                            # Đóng lệnh LONG nếu có
+                            if self.long_state.in_position:
+                                self._force_exit_long(idx, ts, "Supply zone touched")
+                            
+                            print(f"[{ts}] ⚠️  CANCEL BUY FLOW (Supply zone touched)")
                         
                         # Xoá Sell Base cũ nếu có
                         if len(self.short_state.arrayBoxSellBase) > 0:
@@ -1761,15 +1897,21 @@ class PineScriptStrategy:
                     
                     elif so_lan == 0 and not self.short_state.make_color_giam:
                         # Touch LẦN ĐẦU (line 1702)
-                        # Xoá Buy Base nếu có
+                        # ⭐ Xoá BUY BASE + Đóng LONG
                         if len(self.long_state.arrayBoxBuyBase) > 0:
-                            self.long_state.arrayBoxBuyBase.pop()
-                            self.long_state.mang_so_lan_cham_buy_base.pop()
+                            self.long_state.arrayBoxBuyBase.clear()
+                            self.long_state.mang_so_lan_cham_buy_base.clear()
                             self.long_state.finding_entry_buy = False
                             self.long_state.finding_entry_buy_ten_minutes = 0
                             self.long_state.finding_entry_buy_time_out = 0
                             self.long_state.demand_finding_buy_base = False
                             self.long_state.liquid_finding_buy_base = False
+                            
+                            # Đóng lệnh LONG nếu có
+                            if self.long_state.in_position:
+                                self._force_exit_long(idx, ts, "Supply zone touched (1st)")
+                            
+                            print(f"[{ts}] ⚠️  CANCEL BUY FLOW (Supply zone touched 1st)")
                         
                         # Xoá Sell Base cũ nếu có
                         if len(self.short_state.arrayBoxSellBase) > 0:
@@ -1936,6 +2078,22 @@ class PineScriptStrategy:
             SellLiquidity = self.short_state.arraySellLiquidity[i]
             
             if h > SellLiquidity:
+                # ⭐ Xoá BUY BASE + Đóng LONG khi cross Sell Liquidity (Pine line 1466-1478)
+                if len(self.long_state.arrayBoxBuyBase) > 0:
+                    self.long_state.arrayBoxBuyBase.clear()
+                    self.long_state.mang_so_lan_cham_buy_base.clear()
+                    self.long_state.finding_entry_buy = False
+                    self.long_state.finding_entry_buy_ten_minutes = 0
+                    self.long_state.finding_entry_buy_time_out = 0
+                    self.long_state.demand_finding_buy_base = False
+                    self.long_state.liquid_finding_buy_base = False
+                    
+                    # Đóng lệnh LONG nếu có
+                    if self.long_state.in_position:
+                        self._force_exit_long(idx, ts, "Sell Liquidity crossed")
+                    
+                    print(f"[{ts}] ⚠️  CANCEL BUY FLOW (Sell Liquidity crossed)")
+                
                 # Xoá Supply Zone nếu cần (line 1437-1448)
                 if len(self.short_state.arrayBoxSup) > 0:
                     lastBoxBear = self.short_state.arrayBoxSup[-1]
@@ -1952,16 +2110,6 @@ class PineScriptStrategy:
                     self.short_state.finding_entry_sell = False
                     self.short_state.finding_entry_sell_time_out = 0
                     self.short_state.finding_entry_sell_ten_minutes = 0
-                
-                # Xoá Buy Base nếu có
-                if len(self.long_state.arrayBoxBuyBase) > 0:
-                    self.long_state.arrayBoxBuyBase.pop()
-                    self.long_state.mang_so_lan_cham_buy_base.pop()
-                    self.long_state.finding_entry_buy = False
-                    self.long_state.finding_entry_buy_ten_minutes = 0
-                    self.long_state.finding_entry_buy_time_out = 0
-                    self.long_state.demand_finding_buy_base = False
-                    self.long_state.liquid_finding_buy_base = False
                 
                 # Xoá liquidity và set state
                 self.short_state.arraySellLiquidity.pop(i)
@@ -2444,6 +2592,10 @@ class PineScriptStrategy:
         Thực hiện entry Short với SL = base_top + 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 2161-2163).
         """
+        # ⭐ CHECK CONFLICT: Nếu đang có LONG → Đóng LONG trước
+        if self.long_state.in_position:
+            self._force_exit_long(idx, ts, "Conflict: Opening SHORT")
+        
         buyLiquidity_entry = 0.0
         canhTrenLastBoxBull_entry = 0.0
         
@@ -2497,6 +2649,10 @@ class PineScriptStrategy:
         Thực hiện entry Short với SL = sl_sell + 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 2081-2083).
         """
+        # ⭐ CHECK CONFLICT: Nếu đang có LONG → Đóng LONG trước
+        if self.long_state.in_position:
+            self._force_exit_long(idx, ts, "Conflict: Opening SHORT (with sl_sell)")
+        
         buyLiquidity_entry = 0.0
         canhTrenLastBoxBull_entry = 0.0
         

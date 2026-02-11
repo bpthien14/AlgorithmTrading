@@ -3,3 +3,4 @@ pandas_ta
 numpy
 requests
 python-dotenv
+matplotlib

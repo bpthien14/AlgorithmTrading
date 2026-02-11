@@ -26,7 +26,7 @@ class StrategyConfig:
     # → Bây giờ risk_per_trade = 1.0 nghĩa là risk 1% vốn mỗi lệnh
     # → risk_per_trade = 2.0 nghĩa là risk 2% vốn mỗi lệnh
     # Ví dụ: vốn 10M, risk 1% = 100K, nếu SL cách 5 USD thì lot_size = 200,000
-    risk_per_trade: float = 10.0  # 1% vốn mỗi lệnh
+    risk_per_trade: float = 4.0  # 1% vốn mỗi lệnh
 
     # Entry timeout (phút)
     max_entry_timeout_minutes: int = 60  # finding_entry_*_time_out <= 60

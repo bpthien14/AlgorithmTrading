@@ -1,8 +1,13 @@
 import os
+import sys
+import io
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Fix encoding for Windows
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from src.data_loader import (
     load_dukascopy_csv,
@@ -76,3 +81,26 @@ if __name__ == "__main__":
                 f"{i}. {t.entry_time} (OPEN) | "
                 f"Entry: {t.entry_price:.2f}, SL: {t.stop_loss:.2f}, TP: {t.take_profit:.2f}"
             )
+    
+    # ============================================================================
+    # AUTO VISUALIZATION
+    # ============================================================================
+    if len(trades) > 0:
+        print("\n" + "="*80)
+        print("CREATING BACKTEST VISUALIZATION")
+        print("="*80)
+        
+        try:
+            import matplotlib.pyplot as plt
+            from visualize_backtest import create_visualization
+            
+            create_visualization(trades, strat.equity_curve, strat.initial_capital)
+            print("✅ Visualization completed!")
+            
+        except ImportError:
+            print("⚠️  matplotlib chưa được cài đặt.")
+            print("   Để vẽ chart, chạy: pip install matplotlib")
+        except Exception as e:
+            print(f"⚠️  Lỗi khi tạo visualization: {e}")
+    else:
+        print("\n⚠️  Không có trade nào để visualize.")
