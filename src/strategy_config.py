@@ -21,12 +21,8 @@ class StrategyConfig:
     adx_max_entry: float = 30.0         # Điều kiện ADX < adx_max_entry
     adx_period: int = 14                # Period tính ADX (Pine mặc định 14)
 
-    # Position sizing – risk theo % vốn mỗi lệnh
-    # FIXED: Đã sửa công thức từ /100000 thành /100
-    # → Bây giờ risk_per_trade = 1.0 nghĩa là risk 1% vốn mỗi lệnh
-    # → risk_per_trade = 2.0 nghĩa là risk 2% vốn mỗi lệnh
-    # Ví dụ: vốn 10M, risk 1% = 100K, nếu SL cách 5 USD thì lot_size = 200,000
-    risk_per_trade: float = 4.0  # 1% vốn mỗi lệnh
+    # Position sizing (no longer used with risk management removed)
+    risk_per_trade: float = 4.0
 
     # Entry timeout (phút)
     max_entry_timeout_minutes: int = 60  # finding_entry_*_time_out <= 60
@@ -51,9 +47,4 @@ class StrategyConfig:
     enable_early_exit_opposing_zone: bool = True
     enable_base_breakdown_exit: bool = True
     enable_base_resistance_exit: bool = True
-    
-    # Risk Management Protection
-    max_daily_loss_pct: float = 5.0          # Stop trading nếu lỗ 5%/ngày
-    max_consecutive_losses: int = 3          # Stop sau 3 lệnh thua liên tiếp
-    consecutive_loss_reset_mode: str = "win" # "win" = reset sau 1 lệnh win, "daily" = reset mỗi ngày
 
