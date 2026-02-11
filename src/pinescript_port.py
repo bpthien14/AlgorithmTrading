@@ -203,6 +203,97 @@ class PineScriptStrategy:
         self.SmoothedDirectionalMovementMinus = 0.0
         self.ADX = 0.0
         self.DX_buffer = deque(maxlen=self.adx_len)
+        
+        # Risk Management State
+        self.daily_pnl = 0.0                    # PnL trong ngày hiện tại
+        self.consecutive_losses = 0              # Số lệnh thua liên tiếp
+        self.last_trade_date = None             # Ngày của trade cuối cùng
+        self.trading_paused = False             # Flag tạm dừng trading
+        self.daily_start_equity = self.initial_capital  # Equity đầu ngày để tính daily loss
+    
+    def _check_daily_reset(self, current_time: pd.Timestamp):
+        """
+        Kiểm tra và reset daily counters nếu sang ngày mới.
+        """
+        current_date = current_time.date()
+        
+        if self.last_trade_date is None:
+            self.last_trade_date = current_date
+            return
+        
+        # Nếu sang ngày mới → Reset
+        if current_date != self.last_trade_date:
+            self.daily_pnl = 0.0
+            self.daily_start_equity = self.current_equity
+            self.last_trade_date = current_date
+            self.trading_paused = False  # Cho phép trade lại
+            
+            # Reset consecutive losses nếu mode = "daily"
+            if self.config.consecutive_loss_reset_mode == "daily":
+                self.consecutive_losses = 0
+                print(f"[{current_time}] 🔄 NEW DAY: Reset daily_pnl, consecutive_losses")
+            else:
+                print(f"[{current_time}] 🔄 NEW DAY: Reset daily_pnl only (consecutive={self.consecutive_losses})")
+    
+    def _can_trade(self, current_time: pd.Timestamp) -> bool:
+        """
+        Kiểm tra xem có được phép trade không.
+        
+        Returns:
+            True nếu có thể trade, False nếu bị chặn bởi risk management
+        """
+        # Check 1: Reset nếu sang ngày mới
+        self._check_daily_reset(current_time)
+        
+        # Check 2: Max daily loss
+        if self.daily_start_equity > 0:
+            daily_loss_pct = abs(self.daily_pnl / self.daily_start_equity) * 100
+            if self.daily_pnl < 0 and daily_loss_pct >= self.config.max_daily_loss_pct:
+                if not self.trading_paused:
+                    print(f"[{current_time}] ⛔ DAILY LOSS LIMIT REACHED: {daily_loss_pct:.2f}% >= {self.config.max_daily_loss_pct}%")
+                    print(f"[{current_time}] 💤 Trading paused until tomorrow")
+                    self.trading_paused = True
+                return False
+        
+        # Check 3: Max consecutive losses (mode "win")
+        if self.consecutive_losses >= self.config.max_consecutive_losses:
+            if self.config.consecutive_loss_reset_mode == "win":
+                # Chỉ reset khi có 1 lệnh win
+                if not self.trading_paused:
+                    print(f"[{current_time}] ⛔ CONSECUTIVE LOSS LIMIT: {self.consecutive_losses} losses")
+                    print(f"[{current_time}] 💤 Need 1 WIN to resume trading")
+                    self.trading_paused = True
+                return False
+        
+        return True
+    
+    def _update_risk_management(self, pnl: float, current_time: pd.Timestamp):
+        """
+        Cập nhật risk management state sau mỗi trade.
+        
+        Args:
+            pnl: Profit/Loss của trade vừa đóng
+            current_time: Timestamp hiện tại
+        """
+        # Update daily PnL
+        self.daily_pnl += pnl
+        
+        # Update consecutive losses
+        if pnl < 0:
+            self.consecutive_losses += 1
+            print(f"[{current_time}] 📉 Consecutive losses: {self.consecutive_losses}")
+        else:
+            # WIN → Reset consecutive losses (mode "win")
+            if self.config.consecutive_loss_reset_mode == "win" and self.consecutive_losses > 0:
+                old_streak = self.consecutive_losses
+                self.consecutive_losses = 0
+                self.trading_paused = False  # Cho phép trade lại
+                print(f"[{current_time}] ✅ WIN! Reset consecutive losses (was {old_streak})")
+        
+        # Log daily status
+        if self.daily_start_equity > 0:
+            daily_pct = (self.daily_pnl / self.daily_start_equity) * 100
+            print(f"[{current_time}] 📊 Daily P/L: ${self.daily_pnl:+.2f} ({daily_pct:+.2f}%)")
     
     def _calculate_pnl(self, entry_price: float, exit_price: float, lot_size: float, direction: TradeDirection) -> float:
         """
@@ -1272,6 +1363,9 @@ class PineScriptStrategy:
                     if self.current_equity > self.peak_equity:
                         self.peak_equity = self.current_equity
                     
+                    # Update risk management
+                    self._update_risk_management(pnl, ts)
+                    
                     self.long_state.in_position = False
                     self.long_state.doi_sl_05R = False
                     print(f"[{ts}] EXIT LONG (Buy Base broken after 10min) @ {exit_price:.2f}, PnL={pnl:.2f}")
@@ -1315,6 +1409,9 @@ class PineScriptStrategy:
                 self.equity_curve.append(self.current_equity)
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
+                
+                # Update risk management
+                self._update_risk_management(pnl, ts)
                 
                 self.long_state.in_position = False
                 self.long_state.doi_sl_05R = False
@@ -1492,6 +1589,10 @@ class PineScriptStrategy:
         Thực hiện entry Long với SL = base_bottom - 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 1121-1123).
         """
+        # ⭐ CHECK RISK MANAGEMENT: Có được phép trade không?
+        if not self._can_trade(ts):
+            return
+        
         # ⭐ CHECK CONFLICT: Nếu đang có SHORT → Đóng SHORT trước
         if self.short_state.in_position:
             self._force_exit_short(idx, ts, "Conflict: Opening LONG")
@@ -1550,6 +1651,10 @@ class PineScriptStrategy:
         Thực hiện entry Long với SL = sl_buy - 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 1207-1209).
         """
+        # ⭐ CHECK RISK MANAGEMENT: Có được phép trade không?
+        if not self._can_trade(ts):
+            return
+        
         # ⭐ CHECK CONFLICT: Nếu đang có SHORT → Đóng SHORT trước
         if self.short_state.in_position:
             self._force_exit_short(idx, ts, "Conflict: Opening LONG (with sl_buy)")
@@ -1635,6 +1740,9 @@ class PineScriptStrategy:
         if self.current_equity > self.peak_equity:
             self.peak_equity = self.current_equity
         
+        # Update risk management
+        self._update_risk_management(pnl, ts)
+        
         # Reset state
         self.long_state.in_position = False
         self.long_state.doi_sl_05R = False
@@ -1673,6 +1781,9 @@ class PineScriptStrategy:
         # Update peak
         if self.current_equity > self.peak_equity:
             self.peak_equity = self.current_equity
+        
+        # Update risk management
+        self._update_risk_management(pnl, ts)
         
         # Reset state
         self.short_state.in_position = False
@@ -1728,6 +1839,9 @@ class PineScriptStrategy:
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
                 
+                # Update risk management
+                self._update_risk_management(pnl, ts)
+                
                 self.long_state.in_position = False
                 self.long_state.doi_sl_05R = False
                 print(f"[{ts}] EARLY EXIT LONG (Supply Zone too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
@@ -1757,6 +1871,9 @@ class PineScriptStrategy:
                 self.equity_curve.append(self.current_equity)
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
+                
+                # Update risk management
+                self._update_risk_management(pnl, ts)
                 
                 self.long_state.in_position = False
                 self.long_state.doi_sl_05R = False
@@ -1795,6 +1912,9 @@ class PineScriptStrategy:
             if self.current_equity > self.peak_equity:
                 self.peak_equity = self.current_equity
             
+            # Update risk management
+            self._update_risk_management(pnl, ts)
+            
             self.long_state.in_position = False
             self.long_state.doi_sl_05R = False
             return
@@ -1819,6 +1939,9 @@ class PineScriptStrategy:
             self.equity_curve.append(self.current_equity)
             if self.current_equity > self.peak_equity:
                 self.peak_equity = self.current_equity
+            
+            # Update risk management
+            self._update_risk_management(pnl, ts)
             
             self.long_state.in_position = False
             self.long_state.doi_sl_05R = False
@@ -1970,6 +2093,9 @@ class PineScriptStrategy:
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
                 
+                # Update risk management
+                self._update_risk_management(pnl, ts)
+                
                 self.short_state.in_position = False
                 self.short_state.doi_sl_05R_sell = False
                 print(f"[{ts}] EARLY EXIT SHORT (Demand Zone too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
@@ -1999,6 +2125,9 @@ class PineScriptStrategy:
                 self.equity_curve.append(self.current_equity)
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
+                
+                # Update risk management
+                self._update_risk_management(pnl, ts)
                 
                 self.short_state.in_position = False
                 self.short_state.doi_sl_05R_sell = False
@@ -2037,6 +2166,9 @@ class PineScriptStrategy:
             if self.current_equity > self.peak_equity:
                 self.peak_equity = self.current_equity
             
+            # Update risk management
+            self._update_risk_management(pnl, ts)
+            
             self.short_state.in_position = False
             self.short_state.doi_sl_05R_sell = False
             return
@@ -2061,6 +2193,9 @@ class PineScriptStrategy:
             self.equity_curve.append(self.current_equity)
             if self.current_equity > self.peak_equity:
                 self.peak_equity = self.current_equity
+            
+            # Update risk management
+            self._update_risk_management(pnl, ts)
             
             self.short_state.in_position = False
             self.short_state.doi_sl_05R_sell = False
@@ -2438,6 +2573,9 @@ class PineScriptStrategy:
                     if self.current_equity > self.peak_equity:
                         self.peak_equity = self.current_equity
                     
+                    # Update risk management
+                    self._update_risk_management(pnl, ts)
+                    
                     self.short_state.in_position = False
                     self.short_state.doi_sl_05R_sell = False
                     print(f"[{ts}] EXIT SHORT (Sell Base broken after 10min) @ {exit_price:.2f}, PnL={pnl:.2f}")
@@ -2482,6 +2620,9 @@ class PineScriptStrategy:
                 self.equity_curve.append(self.current_equity)
                 if self.current_equity > self.peak_equity:
                     self.peak_equity = self.current_equity
+                
+                # Update risk management
+                self._update_risk_management(pnl, ts)
                 
                 self.short_state.in_position = False
                 self.short_state.doi_sl_05R_sell = False
@@ -2592,6 +2733,10 @@ class PineScriptStrategy:
         Thực hiện entry Short với SL = base_top + 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 2161-2163).
         """
+        # ⭐ CHECK RISK MANAGEMENT: Có được phép trade không?
+        if not self._can_trade(ts):
+            return
+        
         # ⭐ CHECK CONFLICT: Nếu đang có LONG → Đóng LONG trước
         if self.long_state.in_position:
             self._force_exit_long(idx, ts, "Conflict: Opening SHORT")
@@ -2649,6 +2794,10 @@ class PineScriptStrategy:
         Thực hiện entry Short với SL = sl_sell + 0.5.
         Chỉ entry nếu TP hợp lệ (Pine line 2081-2083).
         """
+        # ⭐ CHECK RISK MANAGEMENT: Có được phép trade không?
+        if not self._can_trade(ts):
+            return
+        
         # ⭐ CHECK CONFLICT: Nếu đang có LONG → Đóng LONG trước
         if self.long_state.in_position:
             self._force_exit_long(idx, ts, "Conflict: Opening SHORT (with sl_sell)")

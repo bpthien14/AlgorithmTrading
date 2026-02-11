@@ -1,6 +1,8 @@
 import os
 import sys
 import io
+from collections import defaultdict
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -14,6 +16,120 @@ from src.data_loader import (
     resample_to_m15,
 )
 from src.pinescript_port import PineScriptStrategy
+
+
+def calculate_monthly_pnl(trades):
+    """
+    Tính PnL theo từng tháng từ danh sách trades.
+    
+    Returns:
+        dict: {(year, month): {'pnl': float, 'trades': int, 'wins': int, 'losses': int}}
+    """
+    monthly_stats = defaultdict(lambda: {'pnl': 0.0, 'trades': 0, 'wins': 0, 'losses': 0})
+    
+    for trade in trades:
+        if trade.exit_time is None:
+            continue
+        
+        # Group by exit time (khi trade đóng)
+        year = trade.exit_time.year
+        month = trade.exit_time.month
+        
+        key = (year, month)
+        monthly_stats[key]['pnl'] += trade.pnl
+        monthly_stats[key]['trades'] += 1
+        
+        if trade.pnl > 0:
+            monthly_stats[key]['wins'] += 1
+        elif trade.pnl < 0:
+            monthly_stats[key]['losses'] += 1
+    
+    return dict(monthly_stats)
+
+
+def print_monthly_pnl(trades, initial_capital):
+    """
+    In bảng thống kê PnL theo tháng.
+    """
+    if not trades:
+        return
+    
+    monthly_stats = calculate_monthly_pnl(trades)
+    
+    if not monthly_stats:
+        return
+    
+    print("\n" + "="*90)
+    print("THỐNG KÊ PNL THEO THÁNG")
+    print("="*90)
+    
+    # Sort by year, month
+    sorted_months = sorted(monthly_stats.keys())
+    
+    # Header
+    print(f"{'Tháng':<15} {'Trades':>8} {'Win':>6} {'Loss':>6} {'Win%':>7} {'PnL (USD)':>15} {'PnL %':>10}")
+    print("-" * 90)
+    
+    # Running equity để tính % theo equity cuối tháng trước
+    running_equity = initial_capital
+    total_pnl = 0.0
+    
+    for year, month in sorted_months:
+        stats = monthly_stats[(year, month)]
+        
+        pnl = stats['pnl']
+        trades_count = stats['trades']
+        wins = stats['wins']
+        losses = stats['losses']
+        win_rate = (wins / trades_count * 100) if trades_count > 0 else 0.0
+        
+        # % tính theo equity đầu tháng
+        pnl_pct = (pnl / running_equity * 100) if running_equity > 0 else 0.0
+        
+        # Month name
+        month_name = datetime(year, month, 1).strftime('%Y-%m')
+        
+        # Color coding
+        pnl_sign = '+' if pnl >= 0 else ''
+        
+        print(
+            f"{month_name:<15} "
+            f"{trades_count:>8} "
+            f"{wins:>6} "
+            f"{losses:>6} "
+            f"{win_rate:>6.1f}% "
+            f"{pnl_sign}{pnl:>14,.0f} "
+            f"{pnl_sign}{pnl_pct:>9.2f}%"
+        )
+        
+        running_equity += pnl
+        total_pnl += pnl
+    
+    # Footer
+    print("-" * 90)
+    
+    # Totals
+    total_trades = sum(s['trades'] for s in monthly_stats.values())
+    total_wins = sum(s['wins'] for s in monthly_stats.values())
+    total_losses = sum(s['losses'] for s in monthly_stats.values())
+    overall_win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
+    total_pnl_pct = (total_pnl / initial_capital * 100) if initial_capital > 0 else 0.0
+    
+    pnl_sign = '+' if total_pnl >= 0 else ''
+    
+    print(
+        f"{'TỔNG':<15} "
+        f"{total_trades:>8} "
+        f"{total_wins:>6} "
+        f"{total_losses:>6} "
+        f"{overall_win_rate:>6.1f}% "
+        f"{pnl_sign}{total_pnl:>14,.0f} "
+        f"{pnl_sign}{total_pnl_pct:>9.2f}%"
+    )
+    
+    print(f"\nVốn đầu:  ${initial_capital:>12,.0f}")
+    print(f"Vốn cuối: ${running_equity:>12,.0f}")
+    print("="*90)
 
 
 if __name__ == "__main__":
@@ -65,6 +181,14 @@ if __name__ == "__main__":
     strat = PineScriptStrategy(m1_data=m1_data, m15_data=m15_data)
     trades = strat.run()
 
+    # ============================================================================
+    # MONTHLY PNL STATISTICS
+    # ============================================================================
+    print_monthly_pnl(trades, strat.initial_capital)
+    
+    # ============================================================================
+    # TRADE DETAILS
+    # ============================================================================
     print(f"\n=== TRADE DETAILS ===")
     print(f"Total Trades: {len(trades)}")
     print()

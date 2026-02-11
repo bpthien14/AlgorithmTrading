@@ -13,9 +13,9 @@ class StrategyConfig:
     r_r_ratio_min: float = 1.0          # R:R tối thiểu để chấp nhận entry (hiện tại Pine dùng 1R bắt buộc hợp lệ)
     r_r_ratio_target: float = 2.0       # R:R target khi adjust TP (Pine đang dùng 2R)
 
-    # Trailing SL (dời SL về 0.5R khi đạt 1.5R)
+    # Trailing SL (dời SL về 1.0R khi đạt 1.5R)
     trailing_sl_trigger: float = 1.5    # Khi lãi đạt bao nhiêu R thì kích hoạt trailing
-    trailing_sl_level: float = 1.0      # Dời SL về mức bao nhiêu R
+    trailing_sl_level: float = 1.0      # Dời SL về mức bao nhiêu R (was 0.5R, improved to 1.0R)
 
     # ADX filter
     adx_max_entry: float = 30.0         # Điều kiện ADX < adx_max_entry
@@ -51,4 +51,9 @@ class StrategyConfig:
     enable_early_exit_opposing_zone: bool = True
     enable_base_breakdown_exit: bool = True
     enable_base_resistance_exit: bool = True
+    
+    # Risk Management Protection
+    max_daily_loss_pct: float = 5.0          # Stop trading nếu lỗ 5%/ngày
+    max_consecutive_losses: int = 3          # Stop sau 3 lệnh thua liên tiếp
+    consecutive_loss_reset_mode: str = "win" # "win" = reset sau 1 lệnh win, "daily" = reset mỗi ngày
 
