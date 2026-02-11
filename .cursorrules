@@ -1,0 +1,22 @@
+# Pine Script Conversion Rules
+
+You are working on converting a complex `Pine Script` strategy to `Python`. Follow these rules strictly to ensure high-quality, spec-driven development.
+
+## 1. Spec-Driven Workflow
+- **Spec First**: Always verify logic against `research.md`. If the spec is unclear, pause and clarify or update `research.md`.
+- **Logic Mapping**: Every Python function implementing trading logic should reference the specific Pine Script "Case" or Line Number it replicates.
+    - Example: `def check_case_2(self): # Corresponds to line 475 in source`
+
+## 2. Python Coding Standards
+- **Typing**: All function signatures MUST have type hints.
+- **Docstrings**: Use Google-style docstrings for all classes and methods.
+- **Immutability**: Prefer immutable data structures (`dataclasses(frozen=True)`) for "Events" or "Signals".
+- **State Encapsulation**: Do not use global variables. All state (zones, counters) must be encapsulated within the `Strategy` class.
+
+## 3. Financial Logic
+- **Precision**: Use `float` for price calculations but be mindful of floating-point errors (consider `decimal` if extreme precision is needed, though `float` is standard for backtesting).
+- **Lookahead Bias**: When using higher timeframe data (M15) on lower timeframe simulation (M1), ensure you are NOT peaking ahead. Ensure timestamps align correctly (M15 data is only available after the candle *closes*).
+
+## 4. Dependencies
+- Use `pandas` and `pandas_ta` for data processing.
+- Use native Python structures (`deque`, `list`) for high-frequency loop logic to avoid Pandas overhead in the inner loop if not vectorized.

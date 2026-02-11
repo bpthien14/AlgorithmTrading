@@ -1,0 +1,66 @@
+# Environment variables
+.env
+.env.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data files
+*.csv
+!requirements.txt
+download/
+*.log
+appmap.log
+
+# Output files
+optimization_results.csv
+output.txt
+*.png
+*.PNG
+*.jpg
+*.jpeg
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+
+# Node modules (nếu có)
+node_modules/
+package-lock.json
+
+# Test files
+test_*.py
+verify_*.py
+check_*.py
+giai_thich_*.py
+
+# Documentation (generated)
+ANALYSIS_*.md
+KET_QUA_*.md
+HUONG_DAN_*.md
+GIAI_THICH_*.md
+SUA_*.md
+REVERTED_*.md
