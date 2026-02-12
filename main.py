@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+import argparse
 from collections import defaultdict
 from datetime import datetime
 
@@ -8,8 +9,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+# ============================================================================
+# LOGGING SETUP
+# ============================================================================
+class TeeOutput:
+    """Ghi output vào cả console và file đồng thời."""
+    def __init__(self, file_path):
+        self.terminal = sys.stdout
+        self.log_file = open(file_path, 'w', encoding='utf-8')
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+    
+    def close(self):
+        self.log_file.close()
+
+
 # Fix encoding for Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from src.data_loader import (
     load_dukascopy_csv,
@@ -132,7 +156,94 @@ def print_monthly_pnl(trades, initial_capital):
     print("="*90)
 
 
+# ============================================================================
+# YEAR-BASED DATA FILE SELECTION
+# ============================================================================
+AVAILABLE_YEARS = [2020, 2021, 2022, 2023, 2024, 2025]
+
+
+def get_data_file_for_year(year):
+    """
+    Lấy đường dẫn file data cho năm chỉ định.
+    
+    Args:
+        year: Năm cần backtest (2020-2025), None cho default
+    
+    Returns:
+        str: Đường dẫn đến file CSV
+    """
+    if year is None:
+        # Default: sử dụng env variable hoặc fallback
+        return os.environ.get("DUKASCOPY_CSV_PATH", "dukascopy_xauusd_m1.csv")
+    
+    # Map year to data file
+    file_path = f"download/xauusd-m1-bid-{year}-01-01-{year}-12-31.csv"
+    return file_path
+
+
+def parse_args(args=None):
+    """
+    Parse command line arguments.
+    
+    Args:
+        args: List of arguments (for testing), None to use sys.argv
+    
+    Returns:
+        argparse.Namespace: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description='Backtest PineScript strategy trên dữ liệu XAUUSD M1',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f'''
+Ví dụ sử dụng:
+  python main.py                    # Chạy với data mặc định (env DUKASCOPY_CSV_PATH)
+  python main.py --year 2022        # Backtest năm 2022
+  python main.py --year 2024        # Backtest năm 2024
+
+Các năm có sẵn: {', '.join(map(str, AVAILABLE_YEARS))}
+        '''
+    )
+    
+    parser.add_argument(
+        '--year',
+        type=int,
+        default=None,
+        choices=AVAILABLE_YEARS,
+        help=f'Năm để backtest ({min(AVAILABLE_YEARS)}-{max(AVAILABLE_YEARS)}), không chỉ định = dùng file mặc định'
+    )
+    
+    return parser.parse_args(args)
+
+
 if __name__ == "__main__":
+    # ============================================================================
+    # ARGUMENT PARSING
+    # ============================================================================
+    args = parse_args()
+    
+    # ============================================================================
+    # LOGGING SETUP
+    # ============================================================================
+    # Create output directory if not exists
+    os.makedirs('output', exist_ok=True)
+    
+    # Generate log filename with timestamp and year
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    year_suffix = f"_year{args.year}" if args.year else ""
+    log_file_path = f"output/backtest_{timestamp}{year_suffix}.log"
+    
+    # Setup TeeOutput to log to both console and file
+    tee = TeeOutput(log_file_path)
+    sys.stdout = tee
+    
+    # Print header
+    print(f"📝 Logging to: {log_file_path}")
+    print(f"⏰ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if args.year:
+        print(f"📅 Backtesting year: {args.year}")
+    print("=" * 90)
+    print()
+    
     # ============================================================================
     # DUKASCOPY DATA CONFIGURATION
     # ============================================================================
@@ -148,8 +259,8 @@ if __name__ == "__main__":
     # 3. Place downloaded CSV in project directory and update path below
     # ============================================================================
     
-    # Configure data source
-    DUKASCOPY_CSV = os.environ.get("DUKASCOPY_CSV_PATH", "dukascopy_xauusd_m1.csv")
+    # Configure data source based on year argument
+    DUKASCOPY_CSV = get_data_file_for_year(args.year)
     
     # Try Dukascopy first, fallback to legacy OANDA CSV if not found
     if os.path.exists(DUKASCOPY_CSV):
@@ -187,22 +298,51 @@ if __name__ == "__main__":
     print_monthly_pnl(trades, strat.initial_capital)
     
     # ============================================================================
-    # TRADE DETAILS
+    # PAPER TRADE MODE STATISTICS
     # ============================================================================
-    print(f"\n=== TRADE DETAILS ===")
+    if strat.config.enable_paper_mode:
+        paper = strat.paper_state
+        print(f"\n=== PAPER TRADE MODE STATISTICS ===")
+        print(f"Paper Mode Enabled: Yes")
+        print(f"Trigger: {strat.config.paper_trigger_consecutive_losses} consecutive losses OR win rate < {strat.config.paper_trigger_win_rate_threshold*100:.0f}%")
+        print(f"Recovery: Paper PnL > 0 AND {strat.config.paper_recovery_min_wins} consecutive wins")
+        print()
+        print(f"Paper Mode Activations: {paper.activation_count}")
+        print(f"Total Time in Paper Mode: {paper.total_time_in_paper_minutes:.0f} minutes ({paper.total_time_in_paper_minutes/60:.1f} hours)")
+        print(f"Paper Trades: {len(paper.paper_trades)}")
+        print(f"Paper PnL (Last Session): {paper.paper_pnl:+.0f} USD")
+        
+        if len(paper.paper_trades) > 0:
+            paper_wins = sum(1 for t in paper.paper_trades if t.pnl > 0)
+            paper_losses = sum(1 for t in paper.paper_trades if t.pnl < 0)
+            paper_total_pnl = sum(t.pnl for t in paper.paper_trades)
+            paper_win_rate = paper_wins / len(paper.paper_trades) * 100
+            print(f"Paper Win Rate: {paper_win_rate:.1f}% ({paper_wins}W / {paper_losses}L)")
+            print(f"Paper Total PnL: {paper_total_pnl:+.0f} USD (potential losses avoided)")
+        print()
+    
+    # ============================================================================
+    # TRADE DETAILS (Bangkok Time: UTC+7)
+    # ============================================================================
+    print(f"\n=== TRADE DETAILS (Bangkok Time: UTC+7) ===")
     print(f"Total Trades: {len(trades)}")
     print()
     for i, t in enumerate(trades, 1):
         if t.exit_time:
+            # Convert UTC timestamps to Bangkok time for display
+            entry_bkk = t.entry_time.tz_localize('UTC').tz_convert('Asia/Bangkok')
+            exit_bkk = t.exit_time.tz_localize('UTC').tz_convert('Asia/Bangkok')
             result = "WIN" if t.pnl > 0 else "LOSS" if t.pnl < 0 else "BE"
             print(
-                f"{i:2d}. {t.entry_time.strftime('%Y-%m-%d %H:%M')} -> {t.exit_time.strftime('%Y-%m-%d %H:%M')} | "
+                f"{i:2d}. {entry_bkk.strftime('%Y-%m-%d %H:%M')} -> {exit_bkk.strftime('%Y-%m-%d %H:%M')} (+07) | "
                 f"Entry: {t.entry_price:7.2f}, Exit: {t.exit_price:7.2f} | "
                 f"PnL: {t.pnl:+10,.0f} USD | {result}"
             )
         else:
+            # For open trades, also convert to Bangkok time
+            entry_bkk = t.entry_time.tz_localize('UTC').tz_convert('Asia/Bangkok')
             print(
-                f"{i}. {t.entry_time} (OPEN) | "
+                f"{i}. {entry_bkk.strftime('%Y-%m-%d %H:%M')} (+07) (OPEN) | "
                 f"Entry: {t.entry_price:.2f}, SL: {t.stop_loss:.2f}, TP: {t.take_profit:.2f}"
             )
     
@@ -228,3 +368,17 @@ if __name__ == "__main__":
             print(f"⚠️  Lỗi khi tạo visualization: {e}")
     else:
         print("\n⚠️  Không có trade nào để visualize.")
+    
+    # ============================================================================
+    # CLEANUP & FOOTER
+    # ============================================================================
+    print("\n" + "="*80)
+    print("✅ BACKTEST HOÀN TẤT")
+    print("="*80)
+    print()
+    print(f"📝 Log file saved to: {log_file_path}")
+    print(f"⏰ Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
+    
+    # Close log file
+    tee.close()

@@ -9,8 +9,9 @@ import sys
 import io
 import os
 
-# Fix encoding for Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Fix encoding for Windows (only if not already wrapped)
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # Import strategy
 from src.pinescript_port import PineScriptStrategy

@@ -25,6 +25,28 @@ class Trade:
     take_profit: float = 0.0
     lot_size: float = 0.0
     pnl: float = 0.0
+    is_paper: bool = False  # True = paper trade (không ảnh hưởng equity)
+
+
+@dataclass
+class PaperModeState:
+    """
+    State cho Paper Trade Mode (Circuit Breaker).
+    See research.md Section 5.
+    """
+    is_active: bool = False                              # Đang trong paper mode?
+    activated_at: Optional[pd.Timestamp] = None          # Thời điểm bắt đầu paper mode
+    paper_trades: List[Trade] = field(default_factory=list)  # Các lệnh trong paper mode
+    paper_pnl: float = 0.0                               # Tổng PnL paper mode
+    paper_consecutive_wins: int = 0                      # Chuỗi thắng liên tiếp trong paper
+    
+    # Tracking cho trigger conditions (dùng cho cả live và paper)
+    recent_results: Deque[float] = field(default_factory=lambda: deque(maxlen=10))
+    consecutive_losses: int = 0
+    
+    # Stats
+    activation_count: int = 0                            # Số lần kích hoạt paper mode
+    total_time_in_paper_minutes: float = 0.0             # Tổng thời gian trong paper mode
 
 
 @dataclass
@@ -203,6 +225,11 @@ class PineScriptStrategy:
         self.SmoothedDirectionalMovementMinus = 0.0
         self.ADX = 0.0
         self.DX_buffer = deque(maxlen=self.adx_len)
+        
+        # Paper Trade Mode state (Circuit Breaker)
+        self.paper_state = PaperModeState(
+            recent_results=deque(maxlen=self.config.paper_trigger_win_rate_window)
+        )
     
     def _calculate_pnl(self, entry_price: float, exit_price: float, lot_size: float, direction: TradeDirection) -> float:
         """
@@ -342,7 +369,8 @@ class PineScriptStrategy:
             
             self._entry_long(idx, ts, o, h, l, c)
             if not was_in_position and self.long_state.in_position:
-                print(f"[{ts}] ENTRY LONG @ {self.long_state.entry_price:.2f}, SL={self.long_state.stop_loss:.2f}, TP={self.long_state.take_profit:.2f}")
+                mode_prefix = "📝 [PAPER] " if self._is_paper_mode() else ""
+                print(f"{mode_prefix}[{self._log_timestamp(ts)}] ENTRY LONG @ {self.long_state.entry_price:.2f}, SL={self.long_state.stop_loss:.2f}, TP={self.long_state.take_profit:.2f}")
             
             # 10. SHORT SIDE LOGIC
             # 10.1. Quản lý Supply Zone (touch, remove khi phá trần / chạm 2 lần)
@@ -383,7 +411,8 @@ class PineScriptStrategy:
             was_in_position_short = self.short_state.in_position
             self._entry_short(idx, ts, o, h, l, c)
             if not was_in_position_short and self.short_state.in_position:
-                print(f"[{ts}] ENTRY SHORT @ {self.short_state.entry_price:.2f}, SL={self.short_state.stop_loss:.2f}, TP={self.short_state.take_profit:.2f}")
+                mode_prefix = "📝 [PAPER] " if self._is_paper_mode() else ""
+                print(f"{mode_prefix}[{self._log_timestamp(ts)}] ENTRY SHORT @ {self.short_state.entry_price:.2f}, SL={self.short_state.stop_loss:.2f}, TP={self.short_state.take_profit:.2f}")
             
             # 11. Quản lý position hiện tại (TP/SL) - cả Long & Short
             self._manage_position(idx, ts, o, h, l, c)
@@ -1252,27 +1281,7 @@ class PineScriptStrategy:
                 
                 # Đóng lệnh nếu đang trong position
                 if self.long_state.in_position:
-                    exit_price = c
-                    pnl = (exit_price - self.long_state.entry_price) * self.long_state.lot_size * 0.1
-                    self.current_equity += pnl
-                    
-                    trade = Trade(
-                        entry_time=self.long_state.entry_time,
-                        exit_time=ts,
-                        direction=TradeDirection.BUY,
-                        entry_price=self.long_state.entry_price,
-                        exit_price=exit_price,
-                        stop_loss=self.long_state.stop_loss,
-                        take_profit=self.long_state.take_profit,
-                        lot_size=self.long_state.lot_size,
-                        pnl=pnl,
-                    )
-                    self.trades.append(trade)
-                    self.equity_curve.append(self.current_equity)
-                    if self.current_equity > self.peak_equity:
-                        self.peak_equity = self.current_equity
-                    
-
+                    self._complete_long_trade(ts, c, "Buy Base broken after 10min")
                 
                 # Xử lý liquidity finding (line 1341-1344)
                 if self.long_state.do_buy_base_2_lan == 1:
@@ -1294,29 +1303,7 @@ class PineScriptStrategy:
             
             # Đóng lệnh nếu đang trong position
             if self.long_state.in_position:
-                exit_price = c
-                pnl = (exit_price - self.long_state.entry_price) * self.long_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.long_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.BUY,
-                    entry_price=self.long_state.entry_price,
-                    exit_price=exit_price,
-                    stop_loss=self.long_state.stop_loss,
-                    take_profit=self.long_state.take_profit,
-                    lot_size=self.long_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.long_state.in_position = False
-                self.long_state.doi_sl_05R = False
-                print(f"[{ts}] EXIT LONG (Buy Base resistance hit) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_long_trade(ts, c, "Buy Base resistance hit")
             
             # Xử lý liquidity finding (line 1366-1369)
             if self.long_state.do_buy_base_2_lan == 1:
@@ -1377,6 +1364,11 @@ class PineScriptStrategy:
             self.ADX = sum(self.DX_buffer) / len(self.DX_buffer)
             
     
+    def _log_timestamp(self, ts: pd.Timestamp) -> str:
+        """Format timestamp for logging in Bangkok timezone (UTC+7)."""
+        ts_bangkok = ts.tz_localize('UTC').tz_convert('Asia/Bangkok')
+        return ts_bangkok.strftime('%Y-%m-%d %H:%M:%S %Z')
+    
     def _is_within_timerange(self, ts: pd.Timestamp) -> bool:
         """
         Kiểm tra thời gian có trong khoảng trading không (line 144-163).
@@ -1396,6 +1388,247 @@ class PineScriptStrategy:
             if start_min <= time_in_minutes < end_min:
                 return True
         return False
+    
+    # =========================================================================
+    # PAPER TRADE MODE (Circuit Breaker) - see research.md Section 5
+    # =========================================================================
+    
+    def _check_paper_mode_trigger(self) -> bool:
+        """
+        Check if should switch to Paper Mode.
+        Called after every trade closes in LIVE mode.
+        
+        Returns:
+            True if should activate paper mode.
+        """
+        if not self.config.enable_paper_mode:
+            return False
+        
+        if self.paper_state.is_active:
+            return False  # Already in paper mode
+        
+        # Condition 1: Consecutive losses >= threshold
+        if self.paper_state.consecutive_losses >= self.config.paper_trigger_consecutive_losses:
+            return True
+        
+        # Condition 2: Win rate (last N trades) < threshold
+        if len(self.paper_state.recent_results) >= self.config.paper_trigger_win_rate_window:
+            wins = sum(1 for r in self.paper_state.recent_results if r > 0)
+            win_rate = wins / len(self.paper_state.recent_results)
+            if win_rate < self.config.paper_trigger_win_rate_threshold:
+                return True
+        
+        return False
+    
+    def _check_paper_mode_recovery(self, current_time: pd.Timestamp) -> bool:
+        """
+        Check if should switch back to LIVE mode.
+        Called after every trade closes in PAPER mode.
+        
+        Returns:
+            True if should deactivate paper mode.
+        """
+        if not self.paper_state.is_active:
+            return False
+        
+        # Time limit check (force exit paper mode)
+        if self.paper_state.activated_at is not None:
+            duration_minutes = (current_time - self.paper_state.activated_at).total_seconds() / 60
+            if duration_minutes >= self.config.paper_max_duration_minutes:
+                return True
+        
+        # Recovery conditions (must meet ALL)
+        pnl_ok = (
+            not self.config.paper_recovery_require_positive_pnl 
+            or self.paper_state.paper_pnl > 0
+        )
+        wins_ok = self.paper_state.paper_consecutive_wins >= self.config.paper_recovery_min_wins
+        
+        return pnl_ok and wins_ok
+    
+    def _activate_paper_mode(self, ts: pd.Timestamp, reason: str):
+        """Activate paper trading mode."""
+        self.paper_state.is_active = True
+        self.paper_state.activated_at = ts
+        self.paper_state.paper_pnl = 0.0
+        self.paper_state.paper_consecutive_wins = 0
+        self.paper_state.paper_trades = []
+        self.paper_state.activation_count += 1
+        
+        print(f"⚠️ [{self._log_timestamp(ts)}] PAPER MODE ON | {reason}")
+    
+    def _deactivate_paper_mode(self, ts: pd.Timestamp, reason: str):
+        """Deactivate paper trading mode and return to live."""
+        if self.paper_state.activated_at is not None:
+            duration_minutes = (ts - self.paper_state.activated_at).total_seconds() / 60
+            self.paper_state.total_time_in_paper_minutes += duration_minutes
+        
+        # Reset consecutive losses when exiting paper mode successfully
+        self.paper_state.consecutive_losses = 0
+        self.paper_state.is_active = False
+        self.paper_state.activated_at = None
+        
+        print(f"✅ [{self._log_timestamp(ts)}] PAPER MODE OFF | {reason}")
+    
+    def _on_trade_closed(self, pnl: float, ts: pd.Timestamp, trade: "Trade"):
+        """
+        Handle post-trade logic: update tracking, check paper mode trigger/recovery.
+        
+        Args:
+            pnl: The PnL of the closed trade
+            ts: Timestamp when trade closed
+            trade: The Trade object
+        """
+        is_win = pnl > 0
+        
+        if trade.is_paper:
+            # Paper trade handling
+            self.paper_state.paper_trades.append(trade)
+            self.paper_state.paper_pnl += pnl
+            
+            if is_win:
+                self.paper_state.paper_consecutive_wins += 1
+            else:
+                self.paper_state.paper_consecutive_wins = 0
+            
+            paper_count = len(self.paper_state.paper_trades)
+            print(f"📝 [PAPER #{paper_count}] PnL: {pnl:+.0f} USD | "
+                  f"Paper streak: {self.paper_state.paper_consecutive_wins}W | "
+                  f"Paper total: {self.paper_state.paper_pnl:+.0f} USD")
+            
+            # Check recovery
+            if self._check_paper_mode_recovery(ts):
+                reason = (f"Recovered! Paper PnL: {self.paper_state.paper_pnl:+.0f} USD, "
+                         f"Wins: {self.paper_state.paper_consecutive_wins}")
+                if self.paper_state.activated_at is not None:
+                    duration = (ts - self.paper_state.activated_at).total_seconds() / 60
+                    if duration >= self.config.paper_max_duration_minutes:
+                        reason = f"Max duration ({self.config.paper_max_duration_minutes}min) reached"
+                self._deactivate_paper_mode(ts, reason)
+        else:
+            # Live trade handling
+            self.paper_state.recent_results.append(pnl)
+            
+            if is_win:
+                self.paper_state.consecutive_losses = 0
+            else:
+                self.paper_state.consecutive_losses += 1
+            
+            # Check trigger
+            if self._check_paper_mode_trigger():
+                if self.paper_state.consecutive_losses >= self.config.paper_trigger_consecutive_losses:
+                    reason = f"{self.paper_state.consecutive_losses} consecutive losses"
+                else:
+                    wins = sum(1 for r in self.paper_state.recent_results if r > 0)
+                    win_rate = wins / len(self.paper_state.recent_results) * 100
+                    reason = f"Win rate {win_rate:.1f}% ({wins}/{len(self.paper_state.recent_results)}) below threshold"
+                self._activate_paper_mode(ts, reason)
+    
+    def _is_paper_mode(self) -> bool:
+        """Check if currently in paper mode."""
+        return self.config.enable_paper_mode and self.paper_state.is_active
+    
+    def _complete_long_trade(self, ts: pd.Timestamp, exit_price: float, exit_reason: str):
+        """
+        Complete a long trade: calculate PnL, update equity, track paper mode.
+        
+        Args:
+            ts: Exit timestamp
+            exit_price: Price at exit
+            exit_reason: Description of exit reason for logging
+        """
+        if not self.long_state.in_position:
+            return
+        
+        pnl = (exit_price - self.long_state.entry_price) * self.long_state.lot_size * 0.1
+        is_paper = self._is_paper_mode()
+        
+        trade = Trade(
+            entry_time=self.long_state.entry_time,
+            exit_time=ts,
+            direction=TradeDirection.BUY,
+            entry_price=self.long_state.entry_price,
+            exit_price=exit_price,
+            stop_loss=self.long_state.stop_loss,
+            take_profit=self.long_state.take_profit,
+            lot_size=self.long_state.lot_size,
+            pnl=pnl,
+            is_paper=is_paper,
+        )
+        
+        if not is_paper:
+            # Live trade: update equity
+            self.current_equity += pnl
+            self.trades.append(trade)
+            self.equity_curve.append(self.current_equity)
+            if self.current_equity > self.peak_equity:
+                self.peak_equity = self.current_equity
+            
+            mode_prefix = ""
+        else:
+            mode_prefix = "📝 [PAPER] "
+        
+        # Reset position state
+        self.long_state.in_position = False
+        self.long_state.doi_sl_05R = False
+        
+        # Log exit
+        ts_bkk = self._log_timestamp(ts)
+        print(f"{mode_prefix}[{ts_bkk}] EXIT LONG ({exit_reason}) @ {exit_price:.2f}, PnL={pnl:+.0f} USD")
+        
+        # Handle post-trade logic (paper mode trigger/recovery)
+        self._on_trade_closed(pnl, ts, trade)
+    
+    def _complete_short_trade(self, ts: pd.Timestamp, exit_price: float, exit_reason: str):
+        """
+        Complete a short trade: calculate PnL, update equity, track paper mode.
+        
+        Args:
+            ts: Exit timestamp
+            exit_price: Price at exit
+            exit_reason: Description of exit reason for logging
+        """
+        if not self.short_state.in_position:
+            return
+        
+        pnl = (self.short_state.entry_price - exit_price) * self.short_state.lot_size * 0.1
+        is_paper = self._is_paper_mode()
+        
+        trade = Trade(
+            entry_time=self.short_state.entry_time,
+            exit_time=ts,
+            direction=TradeDirection.SELL,
+            entry_price=self.short_state.entry_price,
+            exit_price=exit_price,
+            stop_loss=self.short_state.stop_loss,
+            take_profit=self.short_state.take_profit,
+            lot_size=self.short_state.lot_size,
+            pnl=pnl,
+            is_paper=is_paper,
+        )
+        
+        if not is_paper:
+            # Live trade: update equity
+            self.current_equity += pnl
+            self.trades.append(trade)
+            self.equity_curve.append(self.current_equity)
+            if self.current_equity > self.peak_equity:
+                self.peak_equity = self.current_equity
+            
+            mode_prefix = ""
+        else:
+            mode_prefix = "📝 [PAPER] "
+        
+        # Reset position state
+        self.short_state.in_position = False
+        self.short_state.doi_sl_05R = False
+        
+        # Log exit
+        ts_bkk = self._log_timestamp(ts)
+        print(f"{mode_prefix}[{ts_bkk}] EXIT SHORT ({exit_reason}) @ {exit_price:.2f}, PnL={pnl:+.0f} USD")
+        
+        # Handle post-trade logic (paper mode trigger/recovery)
+        self._on_trade_closed(pnl, ts, trade)
     
     def _entry_long(self, idx: int, ts: pd.Timestamp, o: float, h: float, l: float, c: float):
         """
@@ -1609,35 +1842,7 @@ class PineScriptStrategy:
             return
         
         exit_price = self.m1.iloc[idx]['close']
-        pnl = (exit_price - self.long_state.entry_price) * self.long_state.lot_size * 0.1
-        
-        # Update equity
-        self.current_equity += pnl
-        
-        # Record trade
-        trade = Trade(
-            entry_time=self.long_state.entry_time,
-            exit_time=ts,
-            direction=TradeDirection.BUY,
-            entry_price=self.long_state.entry_price,
-            exit_price=exit_price,
-            stop_loss=self.long_state.stop_loss,
-            take_profit=self.long_state.take_profit,
-            lot_size=self.long_state.lot_size,
-            pnl=pnl
-        )
-        self.trades.append(trade)
-        self.equity_curve.append(self.current_equity)
-        
-        # Update peak
-        if self.current_equity > self.peak_equity:
-            self.peak_equity = self.current_equity
-        
-        # Reset state
-        self.long_state.in_position = False
-        self.long_state.doi_sl_05R = False
-        
-        print(f"[{ts}] FORCE EXIT LONG @ {exit_price:.2f} | {reason} | PnL={pnl:+.2f}")
+        self._complete_long_trade(ts, exit_price, f"FORCE: {reason}")
     
     def _force_exit_short(self, idx: int, ts: pd.Timestamp, reason: str):
         """
@@ -1648,35 +1853,7 @@ class PineScriptStrategy:
             return
         
         exit_price = self.m1.iloc[idx]['close']
-        pnl = (self.short_state.entry_price - exit_price) * self.short_state.lot_size * 0.1
-        
-        # Update equity
-        self.current_equity += pnl
-        
-        # Record trade
-        trade = Trade(
-            entry_time=self.short_state.entry_time,
-            exit_time=ts,
-            direction=TradeDirection.SELL,
-            entry_price=self.short_state.entry_price,
-            exit_price=exit_price,
-            stop_loss=self.short_state.stop_loss,
-            take_profit=self.short_state.take_profit,
-            lot_size=self.short_state.lot_size,
-            pnl=pnl
-        )
-        self.trades.append(trade)
-        self.equity_curve.append(self.current_equity)
-        
-        # Update peak
-        if self.current_equity > self.peak_equity:
-            self.peak_equity = self.current_equity
-        
-        # Reset state
-        self.short_state.in_position = False
-        self.short_state.doi_sl_05R_sell = False
-        
-        print(f"[{ts}] FORCE EXIT SHORT @ {exit_price:.2f} | {reason} | PnL={pnl:+.2f}")
+        self._complete_short_trade(ts, exit_price, f"FORCE: {reason}")
     
     def _manage_position(self, idx: int, ts: pd.Timestamp, o: float, h: float, l: float, c: float):
         """
@@ -1706,29 +1883,7 @@ class PineScriptStrategy:
             
             # Nếu Supply gần entry hơn SL → Exit ngay
             if abs(canhDuoiLastBoxBear - entry_price) < abs(entry_price - sl):
-                exit_price = c  # Exit at current close
-                pnl = (exit_price - entry_price) * self.long_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.long_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.BUY,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    stop_loss=sl,
-                    take_profit=tp,
-                    lot_size=self.long_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.long_state.in_position = False
-                self.long_state.doi_sl_05R = False
-                print(f"[{ts}] EARLY EXIT LONG (Supply Zone too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_long_trade(ts, c, "Supply Zone too close")
                 return
         
         # 2. Early Exit: Sell Liquidity xuất hiện gần entry hơn SL (Pine line 1291-1301)
@@ -1736,29 +1891,7 @@ class PineScriptStrategy:
             lineGiam_price = self.short_state.arraySellLiquidity[-1]
             
             if abs(lineGiam_price - entry_price) < abs(entry_price - sl):
-                exit_price = c
-                pnl = (exit_price - entry_price) * self.long_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.long_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.BUY,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    stop_loss=sl,
-                    take_profit=tp,
-                    lot_size=self.long_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.long_state.in_position = False
-                self.long_state.doi_sl_05R = False
-                print(f"[{ts}] EARLY EXIT LONG (Sell Liquidity too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_long_trade(ts, c, "Sell Liquidity too close")
                 return
         
         # 3. Move SL to trailing_sl_level * R khi profit đạt trailing_sl_trigger * R (Pine line 1303-1308)
@@ -1774,52 +1907,12 @@ class PineScriptStrategy:
         
         # 4. Hit SL
         if l <= self.long_state.stop_loss:
-            pnl = (self.long_state.stop_loss - entry_price) * self.long_state.lot_size * 0.1
-            self.current_equity += pnl
-            
-            trade = Trade(
-                entry_time=self.long_state.entry_time,
-                exit_time=ts,
-                direction=TradeDirection.BUY,
-                entry_price=entry_price,
-                exit_price=self.long_state.stop_loss,
-                stop_loss=self.long_state.stop_loss,
-                take_profit=tp,
-                lot_size=self.long_state.lot_size,
-                pnl=pnl,
-            )
-            self.trades.append(trade)
-            self.equity_curve.append(self.current_equity)
-            if self.current_equity > self.peak_equity:
-                self.peak_equity = self.current_equity
-            
-            self.long_state.in_position = False
-            self.long_state.doi_sl_05R = False
+            self._complete_long_trade(ts, self.long_state.stop_loss, "SL hit")
             return
         
         # 5. Hit TP
         if h >= self.long_state.take_profit:
-            pnl = (tp - entry_price) * self.long_state.lot_size * 0.1
-            self.current_equity += pnl
-            
-            trade = Trade(
-                entry_time=self.long_state.entry_time,
-                exit_time=ts,
-                direction=TradeDirection.BUY,
-                entry_price=entry_price,
-                exit_price=tp,
-                stop_loss=self.long_state.stop_loss,
-                take_profit=tp,
-                lot_size=self.long_state.lot_size,
-                pnl=pnl,
-            )
-            self.trades.append(trade)
-            self.equity_curve.append(self.current_equity)
-            if self.current_equity > self.peak_equity:
-                self.peak_equity = self.current_equity
-            
-            self.long_state.in_position = False
-            self.long_state.doi_sl_05R = False
+            self._complete_long_trade(ts, tp, "TP hit")
             return
     
     def _manage_supply_zones(self, idx: int, o: float, h: float, l: float, c: float, ts: pd.Timestamp):
@@ -1948,29 +2041,7 @@ class PineScriptStrategy:
             
             # Nếu Demand gần entry hơn SL → Exit ngay
             if abs(canhTrenLastBoxBull - entry_price) < abs(entry_price - sl):
-                exit_price = c  # Exit at current close
-                pnl = (entry_price - exit_price) * self.short_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.short_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.SELL,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    stop_loss=sl,
-                    take_profit=tp,
-                    lot_size=self.short_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.short_state.in_position = False
-                self.short_state.doi_sl_05R_sell = False
-                print(f"[{ts}] EARLY EXIT SHORT (Demand Zone too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_short_trade(ts, c, "Demand Zone too close")
                 return
         
         # 2. Early Exit: Buy Liquidity xuất hiện gần entry hơn SL (Pine line 2243-2253)
@@ -1978,29 +2049,7 @@ class PineScriptStrategy:
             lineTang_price = self.long_state.arrayBuyLiquidity[-1]
             
             if abs(lineTang_price - entry_price) < abs(entry_price - sl):
-                exit_price = c
-                pnl = (entry_price - exit_price) * self.short_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.short_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.SELL,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    stop_loss=sl,
-                    take_profit=tp,
-                    lot_size=self.short_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.short_state.in_position = False
-                self.short_state.doi_sl_05R_sell = False
-                print(f"[{ts}] EARLY EXIT SHORT (Buy Liquidity too close) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_short_trade(ts, c, "Buy Liquidity too close")
                 return
         
         # 3. Move SL to trailing_sl_level * R khi profit đạt trailing_sl_trigger * R (Pine line 2255-2260)
@@ -2016,52 +2065,12 @@ class PineScriptStrategy:
         
         # 4. Hit SL (Short: giá chạm SL khi HIGH >= SL)
         if h >= self.short_state.stop_loss:
-            pnl = (entry_price - self.short_state.stop_loss) * self.short_state.lot_size * 0.1
-            self.current_equity += pnl
-            
-            trade = Trade(
-                entry_time=self.short_state.entry_time,
-                exit_time=ts,
-                direction=TradeDirection.SELL,
-                entry_price=entry_price,
-                exit_price=self.short_state.stop_loss,
-                stop_loss=self.short_state.stop_loss,
-                take_profit=tp,
-                lot_size=self.short_state.lot_size,
-                pnl=pnl,
-            )
-            self.trades.append(trade)
-            self.equity_curve.append(self.current_equity)
-            if self.current_equity > self.peak_equity:
-                self.peak_equity = self.current_equity
-            
-            self.short_state.in_position = False
-            self.short_state.doi_sl_05R_sell = False
+            self._complete_short_trade(ts, self.short_state.stop_loss, "SL hit")
             return
         
         # 5. Hit TP (Short: giá chạm TP khi LOW <= TP)
         if l <= self.short_state.take_profit:
-            pnl = (entry_price - tp) * self.short_state.lot_size * 0.1
-            self.current_equity += pnl
-            
-            trade = Trade(
-                entry_time=self.short_state.entry_time,
-                exit_time=ts,
-                direction=TradeDirection.SELL,
-                entry_price=entry_price,
-                exit_price=tp,
-                stop_loss=self.short_state.stop_loss,
-                take_profit=tp,
-                lot_size=self.short_state.lot_size,
-                pnl=pnl,
-            )
-            self.trades.append(trade)
-            self.equity_curve.append(self.current_equity)
-            if self.current_equity > self.peak_equity:
-                self.peak_equity = self.current_equity
-            
-            self.short_state.in_position = False
-            self.short_state.doi_sl_05R_sell = False
+            self._complete_short_trade(ts, tp, "TP hit")
             return
     
     def _check_sell_liquidity_crossed(self, idx: int, ts: pd.Timestamp, o: float, h: float, l: float, c: float):
@@ -2416,29 +2425,7 @@ class PineScriptStrategy:
                 
                 # Đóng lệnh nếu đang trong position
                 if self.short_state.in_position:
-                    exit_price = c
-                    pnl = (self.short_state.entry_price - exit_price) * self.short_state.lot_size * 0.1
-                    self.current_equity += pnl
-                    
-                    trade = Trade(
-                        entry_time=self.short_state.entry_time,
-                        exit_time=ts,
-                        direction=TradeDirection.SELL,
-                        entry_price=self.short_state.entry_price,
-                        exit_price=exit_price,
-                        stop_loss=self.short_state.stop_loss,
-                        take_profit=self.short_state.take_profit,
-                        lot_size=self.short_state.lot_size,
-                        pnl=pnl,
-                    )
-                    self.trades.append(trade)
-                    self.equity_curve.append(self.current_equity)
-                    if self.current_equity > self.peak_equity:
-                        self.peak_equity = self.current_equity
-                    
-                    self.short_state.in_position = False
-                    self.short_state.doi_sl_05R_sell = False
-                    print(f"[{ts}] EXIT SHORT (Sell Base broken after 10min) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                    self._complete_short_trade(ts, c, "Sell Base broken after 10min")
                 
                 # Xử lý liquidity finding (line 2290-2294)
                 if self.short_state.do_sell_base_2_lan == 1:
@@ -2461,29 +2448,7 @@ class PineScriptStrategy:
             
             # Đóng lệnh nếu đang trong position
             if self.short_state.in_position:
-                exit_price = c
-                pnl = (self.short_state.entry_price - exit_price) * self.short_state.lot_size * 0.1
-                self.current_equity += pnl
-                
-                trade = Trade(
-                    entry_time=self.short_state.entry_time,
-                    exit_time=ts,
-                    direction=TradeDirection.SELL,
-                    entry_price=self.short_state.entry_price,
-                    exit_price=exit_price,
-                    stop_loss=self.short_state.stop_loss,
-                    take_profit=self.short_state.take_profit,
-                    lot_size=self.short_state.lot_size,
-                    pnl=pnl,
-                )
-                self.trades.append(trade)
-                self.equity_curve.append(self.current_equity)
-                if self.current_equity > self.peak_equity:
-                    self.peak_equity = self.current_equity
-                
-                self.short_state.in_position = False
-                self.short_state.doi_sl_05R_sell = False
-                print(f"[{ts}] EXIT SHORT (Sell Base resistance hit) @ {exit_price:.2f}, PnL={pnl:.2f}")
+                self._complete_short_trade(ts, c, "Sell Base resistance hit")
             
             # Xử lý liquidity finding (line 2319-2322)
             if self.short_state.do_sell_base_2_lan == 1:
